@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push",
     "db:init": "tsx --env-file=.env scripts/add-schema-inicial.ts",
     "db:seed": "tsx --env-file=.env scripts/seed.ts",
+    "db:reset-financeiro": "tsx --env-file=.env scripts/reset-financeiro.ts",
     "test": "vitest run"
   },
   "dependencies": {
