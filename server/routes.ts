@@ -20,6 +20,14 @@ import { parseExtratoCsv } from "@shared/extrato-import";
 import { sugerirConciliacao } from "@shared/extrato-conciliacao";
 import { resolveDebitoNatureza } from "@shared/prolabore";
 import {
+  parsePlanilhaMovimentacoesBuffer,
+  mapCategoriaPagar,
+  inferFormaReceita,
+  isReceitaOperacional,
+  isTransferenciaInterna,
+  type PlanilhaMovRow,
+} from "@shared/planilha-movimentacoes-import";
+import {
   calcMinimoSobrevivencia,
   calcPontoEquilibrio,
   sumReceitasMes,
@@ -28,6 +36,10 @@ import {
 import { hojeBrasil, addDias, round2, emptyDiaReal } from "@shared/fluxo-utils";
 
 const extratoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const planilhaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
 
 function authorize(...roles: string[]): RequestHandler {
   return (req, res, next) => {
@@ -238,6 +250,184 @@ export async function registerRoutes(app: Express) {
       .returning();
     if (!row) return res.status(404).json({ message: "Não encontrado" });
     res.json(row);
+  });
+
+  // ── Planilha entradas/saídas (XLSX) ──────────────────────────────────
+  app.post(
+    "/api/planilha/parse",
+    authorize("admin", "gestor"),
+    planilhaUpload.single("file"),
+    async (req: any, res) => {
+      try {
+        if (!req.file?.buffer) return res.status(400).json({ message: "Arquivo obrigatório" });
+        const parsed = parsePlanilhaMovimentacoesBuffer(req.file.buffer);
+        res.json({
+          ...parsed,
+          preview: parsed.rows.slice(0, 30),
+        });
+      } catch (e: any) {
+        res.status(400).json({ message: e.message || "Falha ao ler planilha" });
+      }
+    },
+  );
+
+  app.post("/api/planilha/import", authorize("admin", "gestor"), async (req, res) => {
+    try {
+      const rows = (req.body?.rows ?? []) as PlanilhaMovRow[];
+      const opts = {
+        extrato: req.body?.extrato !== false,
+        receitas: req.body?.receitas !== false,
+        despesas: req.body?.despesas !== false,
+        skipTransferenciasInternas: req.body?.skipTransferenciasInternas !== false,
+      };
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "rows obrigatório" });
+      }
+
+      const result = {
+        extratoInseridos: 0,
+        extratoDuplicados: 0,
+        receitasInseridas: 0,
+        receitasDuplicadas: 0,
+        despesasInseridas: 0,
+        despesasDuplicadas: 0,
+        contasCriadas: [] as string[],
+      };
+
+      const contaIds = new Map<string, string>();
+      async function ensureConta(nome: string): Promise<string> {
+        // Uma conta consolidada: o Fluxo lê a conta ativa; a origem fica no histórico.
+        const consolidado = "Planilha consolidada";
+        if (contaIds.has(consolidado)) return contaIds.get(consolidado)!;
+        const slug = "planilha-consolidada";
+        const [existing] = await db
+          .select()
+          .from(bancoContas)
+          .where(and(eq(bancoContas.agencia, "planilha"), eq(bancoContas.conta, slug)))
+          .limit(1);
+        if (existing) {
+          contaIds.set(consolidado, existing.id);
+          return existing.id;
+        }
+        const datas = rows.map((r) => r.data).sort();
+        const primeira = datas[0];
+        let ancoraData: string | null = null;
+        if (primeira) {
+          const d = new Date(primeira + "T00:00:00Z");
+          d.setUTCDate(d.getUTCDate() - 1);
+          ancoraData = d.toISOString().slice(0, 10);
+        }
+        const [created] = await db
+          .insert(bancoContas)
+          .values({
+            nome: consolidado,
+            agencia: "planilha",
+            conta: slug,
+            ativo: true,
+            saldoInicialData: ancoraData,
+            saldoInicialValor: "0",
+          })
+          .returning();
+        result.contasCriadas.push(`${consolidado} (origem: ${nome})`);
+        contaIds.set(consolidado, created.id);
+        return created.id;
+      }
+
+      // Prefetch existentes para dedup de receita/despesa
+      const receitasExist = opts.receitas
+        ? await db.select({ data: receitasDia.data, valor: receitasDia.valor, observacao: receitasDia.observacao }).from(receitasDia)
+        : [];
+      const receitaKeys = new Set(
+        receitasExist.map((r) => `${r.data}|${Number(r.valor).toFixed(2)}|${(r.observacao ?? "").slice(0, 120)}`),
+      );
+
+      const cpsExist = opts.despesas
+        ? await db
+            .select({
+              dataVencimento: contasPagar.dataVencimento,
+              valor: contasPagar.valor,
+              descricao: contasPagar.descricao,
+            })
+            .from(contasPagar)
+        : [];
+      const cpKeys = new Set(
+        cpsExist.map((c) => `${c.dataVencimento}|${Number(c.valor).toFixed(2)}|${c.descricao}`),
+      );
+
+      for (const row of rows) {
+        const skipInterna = opts.skipTransferenciasInternas && isTransferenciaInterna(row.categoria);
+
+        if (opts.extrato) {
+          const contaId = await ensureConta(row.conta);
+          const valor = row.tipo === "Entrada" ? row.entrada : row.saida;
+          const tipo = row.tipo === "Entrada" ? "C" : "D";
+          const historico = `[${row.conta}] ${row.descricao}`.toUpperCase().slice(0, 500);
+          try {
+            await db.insert(bancoMovimentacoes).values({
+              contaId,
+              data: row.data,
+              historico,
+              documento: row.fonte,
+              valor: String(valor),
+              tipo,
+              ocorrencia: 1,
+              dedupKey: row.dedupKey,
+              prolaboreComentario: row.observacao,
+              ...(skipInterna && tipo === "D" ? { prolaboreOverride: "excluir" } : {}),
+            });
+            result.extratoInseridos++;
+          } catch {
+            result.extratoDuplicados++;
+          }
+        }
+
+        if (opts.receitas && row.tipo === "Entrada" && isReceitaOperacional(row.categoria) && !skipInterna) {
+          const forma = inferFormaReceita(row.conta, row.descricao);
+          const obs = [row.descricao, row.subcategoria, row.observacao].filter(Boolean).join(" · ").slice(0, 500);
+          const key = `${row.data}|${row.entrada.toFixed(2)}|${obs.slice(0, 120)}`;
+          if (receitaKeys.has(key)) {
+            result.receitasDuplicadas++;
+          } else {
+            await db.insert(receitasDia).values({
+              data: row.data,
+              valor: String(row.entrada),
+              forma,
+              observacao: obs || null,
+            });
+            receitaKeys.add(key);
+            result.receitasInseridas++;
+          }
+        }
+
+        if (opts.despesas && row.tipo === "Saida" && !skipInterna) {
+          const desc = row.descricao.slice(0, 200);
+          const key = `${row.data}|${row.saida.toFixed(2)}|${desc}`;
+          if (cpKeys.has(key)) {
+            result.despesasDuplicadas++;
+          } else {
+            await db.insert(contasPagar).values({
+              descricao: desc,
+              valor: String(row.saida),
+              dataVencimento: row.data,
+              dataPagamento: row.data,
+              status: "pago",
+              categoria: mapCategoriaPagar(row.categoria),
+              observacoes: [row.categoria, row.subcategoria, row.conta, row.observacao]
+                .filter(Boolean)
+                .join(" · ")
+                .slice(0, 500),
+            });
+            cpKeys.add(key);
+            result.despesasInseridas++;
+          }
+        }
+      }
+
+      res.json(result);
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ message: e.message });
+    }
   });
 
   // ── Fluxo ─────────────────────────────────────────────────────────────

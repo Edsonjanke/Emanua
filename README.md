@@ -42,6 +42,19 @@ DD/MM/YYYY;Histórico;Documento;Valor;C|D
 
 Na importação, preencha a **âncora** (data + saldo no fim daquele dia) para o gráfico de saldo real.
 
+## Planilha entradas/saídas (XLSX)
+
+Botão **Importar planilha** no Fluxo. Aba `Movimentações` com colunas:
+
+`Data | Conta | Tipo | Descrição | Categoria | Entrada (R$) | Saída (R$) | …`
+
+Importa para:
+- extrato consolidado (saldo do fluxo)
+- receitas operacionais → `receitas_dia`
+- saídas (exceto transferências internas) → contas a pagar já baixadas
+
+Reimportação é idempotente (dedup por chave).
+
 ## Receita do dia
 
 Lançamento rápido (dinheiro / PIX / cartão) sem detalhar sessão. Alimenta faturamento/metas. PIX/cartão entram no saldo bancário só via extrato.

@@ -21,6 +21,7 @@ import FluxoLancamentoModal, {
   type LancamentoEdit,
   type LancamentoTipo,
 } from "@/components/fluxo-lancamento-modal";
+import ImportPlanilhaModal from "@/components/import-planilha-modal";
 
 interface FluxoData {
   hoje: string;
@@ -47,6 +48,7 @@ export default function FluxoTab() {
   const [incluirDas, setIncluirDas] = useState(false);
   const [incluirProLabore, setIncluirProLabore] = useState(true);
   const [modal, setModal] = useState<LancamentoEdit | null>(null);
+  const [planilhaOpen, setPlanilhaOpen] = useState(false);
   const [saldoInicial, setSaldoInicial] = useState({ data: "", valor: "" });
 
   const q = useQuery({
@@ -161,6 +163,13 @@ export default function FluxoTab() {
           className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:brightness-110"
         >
           Importar Extrato
+        </button>
+        <button
+          type="button"
+          onClick={() => setPlanilhaOpen(true)}
+          className="rounded-lg border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+        >
+          Importar planilha
         </button>
         <input
           ref={fileRef}
@@ -448,6 +457,15 @@ export default function FluxoTab() {
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null);
+            refresh();
+          }}
+        />
+      )}
+      {planilhaOpen && (
+        <ImportPlanilhaModal
+          onClose={() => setPlanilhaOpen(false)}
+          onSaved={() => {
+            setPlanilhaOpen(false);
             refresh();
           }}
         />
