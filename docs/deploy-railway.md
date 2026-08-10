@@ -19,4 +19,6 @@ URL pública: **https://web-production-c03b9.up.railway.app**
 
 Settings → Networking → Generate Domain (porta alvo **8080**).
 
-Redeploy: `npx @railway/cli up -y -c --service web`
+**Repo ligado:** `Edsonjanke/Emanua` branch `main` — push em `main` dispara redeploy.
+
+Redeploy manual: `npx @railway/cli up -y -c --service web`

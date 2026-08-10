@@ -1,0 +1,235 @@
+import { useState } from "react";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
+import { hojeBrasil } from "@/lib/date";
+
+export type LancamentoTipo = "receita" | "pagar" | "receber";
+
+export interface LancamentoEdit {
+  id?: string;
+  tipo: LancamentoTipo;
+  data?: string;
+  dataVencimento?: string;
+  valor?: number | string;
+  forma?: "dinheiro" | "pix" | "cartao";
+  observacao?: string | null;
+  observacoes?: string | null;
+  descricao?: string | null;
+  clienteNome?: string;
+  categoria?: string | null;
+  recorrencia?: "mensal" | null;
+  status?: string;
+}
+
+const CATEGORIAS = [
+  "Aluguel",
+  "Energia",
+  "Água",
+  "Internet",
+  "Insumos",
+  "Roupas/Lençóis",
+  "Marketing",
+  "Contabilidade",
+  "DAS",
+  "Pessoal",
+  "Pró-labore",
+  "Outros",
+];
+
+const TITLES: Record<LancamentoTipo, string> = {
+  receita: "Receita do dia",
+  pagar: "Conta a pagar",
+  receber: "Conta a receber",
+};
+
+export default function FluxoLancamentoModal({
+  initial,
+  onClose,
+  onSaved,
+}: {
+  initial: LancamentoEdit;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const editing = !!initial.id;
+  const tipo = initial.tipo;
+  const [data, setData] = useState(initial.data || initial.dataVencimento || hojeBrasil());
+  const [valor, setValor] = useState(initial.valor != null ? String(initial.valor) : "");
+  const [forma, setForma] = useState<"dinheiro" | "pix" | "cartao">(initial.forma || "dinheiro");
+  const [observacao, setObservacao] = useState(initial.observacao || initial.observacoes || "");
+  const [descricao, setDescricao] = useState(initial.descricao || "");
+  const [clienteNome, setClienteNome] = useState(initial.clienteNome || "");
+  const [categoria, setCategoria] = useState(initial.categoria || "Outros");
+  const [recorrencia, setRecorrencia] = useState<"" | "mensal">(
+    initial.recorrencia === "mensal" ? "mensal" : "",
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      if (tipo === "receita") {
+        const body = {
+          data,
+          valor: Number(valor),
+          forma,
+          observacao: observacao || null,
+        };
+        if (editing) await api.patch(`/api/receitas-dia/${initial.id}`, body);
+        else await api.post("/api/receitas-dia", body);
+        toast.success(editing ? "Receita atualizada" : "Receita lançada");
+      } else if (tipo === "pagar") {
+        const body = {
+          descricao,
+          valor: Number(valor),
+          dataVencimento: data,
+          categoria,
+          observacoes: observacao || null,
+          recorrencia: recorrencia || null,
+        };
+        if (editing) await api.patch(`/api/contas-pagar/${initial.id}`, body);
+        else await api.post("/api/contas-pagar", body);
+        toast.success(editing ? "Despesa atualizada" : "Despesa criada");
+      } else {
+        const body = {
+          clienteNome,
+          descricao: descricao || null,
+          valor: Number(valor),
+          dataVencimento: data,
+          observacoes: observacao || null,
+        };
+        if (editing) await api.patch(`/api/recebiveis/${initial.id}`, body);
+        else await api.post("/api/recebiveis", body);
+        toast.success(editing ? "Recebível atualizado" : "Recebível criado");
+      }
+      onSaved();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={save}
+        className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5 space-y-3"
+      >
+        <h3 className="text-lg text-white">
+          {editing ? "Editar" : "Nova"} {TITLES[tipo].toLowerCase()}
+        </h3>
+
+        {tipo === "receber" && (
+          <>
+            <label className="block text-xs text-[var(--text-muted)]">Cliente</label>
+            <input
+              required
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+              value={clienteNome}
+              onChange={(e) => setClienteNome(e.target.value)}
+            />
+          </>
+        )}
+
+        {(tipo === "pagar" || tipo === "receber") && (
+          <>
+            <label className="block text-xs text-[var(--text-muted)]">Descrição</label>
+            <input
+              required={tipo === "pagar"}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+            />
+          </>
+        )}
+
+        <label className="block text-xs text-[var(--text-muted)]">
+          {tipo === "receita" ? "Data" : "Vencimento"}
+        </label>
+        <input
+          type="date"
+          required
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+          value={data}
+          onChange={(e) => setData(e.target.value)}
+        />
+
+        <label className="block text-xs text-[var(--text-muted)]">Valor</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          required
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+          value={valor}
+          onChange={(e) => setValor(e.target.value)}
+        />
+
+        {tipo === "receita" && (
+          <>
+            <label className="block text-xs text-[var(--text-muted)]">Forma</label>
+            <select
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+              value={forma}
+              onChange={(e) => setForma(e.target.value as any)}
+            >
+              <option value="dinheiro">Dinheiro</option>
+              <option value="pix">PIX</option>
+              <option value="cartao">Cartão</option>
+            </select>
+          </>
+        )}
+
+        {tipo === "pagar" && (
+          <>
+            <label className="block text-xs text-[var(--text-muted)]">Categoria</label>
+            <select
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+              value={categoria}
+              onChange={(e) => setCategoria(e.target.value)}
+            >
+              {CATEGORIAS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <label className="block text-xs text-[var(--text-muted)]">Recorrência</label>
+            <select
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+              value={recorrencia}
+              onChange={(e) => setRecorrencia(e.target.value as any)}
+            >
+              <option value="">Única</option>
+              <option value="mensal">Mensal</option>
+            </select>
+          </>
+        )}
+
+        <label className="block text-xs text-[var(--text-muted)]">Observação</label>
+        <input
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+          value={observacao}
+          onChange={(e) => setObservacao(e.target.value)}
+          placeholder="opcional"
+        />
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-[var(--text-muted)]">
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
+          >
+            {busy ? "Salvando…" : "Salvar"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

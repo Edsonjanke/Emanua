@@ -331,9 +331,8 @@ export async function registerRoutes(app: Express) {
         const emitir = d >= de;
         if (d < hoje) {
           const real = realPorDia.get(d) ?? emptyDiaReal();
-          const receitaDia = receitas
-            .filter((r) => r.data === d)
-            .reduce((s, r) => s + parseFloat(String(r.valor)), 0);
+          const receitaDiaRows = receitas.filter((r) => r.data === d);
+          const receitaDia = receitaDiaRows.reduce((s, r) => s + parseFloat(String(r.valor)), 0);
           if (saldoRealCorrente != null && ancoraData != null && d > ancoraData) {
             saldoRealCorrente = round2(saldoRealCorrente + real.entradas - real.saidas);
           }
@@ -347,6 +346,22 @@ export async function registerRoutes(app: Express) {
               receitaDia: round2(receitaDia),
               saldoReal: d >= (ancoraData ?? "") ? saldoRealCorrente : null,
             });
+          // Receitas passadas entram na timeline pra permitir CRUD
+          if (emitir && receitaDiaRows.length) {
+            dias.push({
+              data: d,
+              entradas: receitaDiaRows.map((x) => ({
+                id: x.id,
+                tipo: "receita" as const,
+                clienteNome: `Receita ${x.forma}`,
+                descricao: x.observacao,
+                valor: parseFloat(String(x.valor)),
+                forma: x.forma,
+                observacao: x.observacao,
+              })),
+              saidas: [],
+            });
+          }
         } else {
           const abertasDia = recsAbertas.filter((x) => x.dataVencimento === d);
           let saidasDia = cps.filter((x) => x.dataVencimento === d);
@@ -386,20 +401,36 @@ export async function registerRoutes(app: Express) {
               data: d,
               entradas: [
                 ...abertasDia.map((x) => ({
+                  id: x.id,
+                  tipo: "recebivel" as const,
                   clienteNome: x.clienteNome,
                   descricao: x.descricao,
                   valor: parseFloat(String(x.valor)),
+                  dataVencimento: x.dataVencimento,
+                  status: x.status,
+                  observacoes: x.observacoes,
                 })),
                 ...receitasDoDia.map((x) => ({
+                  id: x.id,
+                  tipo: "receita" as const,
                   clienteNome: `Receita ${x.forma}`,
                   descricao: x.observacao,
                   valor: parseFloat(String(x.valor)),
+                  forma: x.forma,
+                  observacao: x.observacao,
+                  data: x.data,
                 })),
               ],
               saidas: saidasDia.map((x) => ({
+                id: x.id,
+                tipo: "pagar" as const,
                 descricao: x.descricao,
                 valor: parseFloat(String(x.valor)),
                 categoria: x.categoria,
+                dataVencimento: x.dataVencimento,
+                status: x.status,
+                recorrencia: x.recorrencia,
+                observacoes: x.observacoes,
               })),
             });
           }
@@ -422,6 +453,8 @@ export async function registerRoutes(app: Express) {
         custosVariaveis: 0,
       });
       const pe = calcPontoEquilibrio(totalFixos, Number(meta?.margemContribuicaoPct ?? 60));
+
+      dias.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
 
       res.json({
         hoje,
@@ -484,6 +517,25 @@ export async function registerRoutes(app: Express) {
       })
       .returning();
     res.status(201).json(row);
+  });
+
+  app.patch("/api/receitas-dia/:id", authorize("admin", "gestor"), async (req, res) => {
+    const body = req.body ?? {};
+    if (body.forma != null && !["dinheiro", "pix", "cartao"].includes(body.forma)) {
+      return res.status(400).json({ message: "forma inválida" });
+    }
+    const patch: Record<string, unknown> = {};
+    if (body.data != null) patch.data = String(body.data);
+    if (body.valor != null) patch.valor = String(body.valor);
+    if (body.forma != null) patch.forma = body.forma;
+    if (body.observacao !== undefined) patch.observacao = body.observacao;
+    const [row] = await db
+      .update(receitasDia)
+      .set(patch as any)
+      .where(eq(receitasDia.id, req.params.id))
+      .returning();
+    if (!row) return res.status(404).json({ message: "Não encontrado" });
+    res.json(row);
   });
 
   app.delete("/api/receitas-dia/:id", authorize("admin", "gestor"), async (req, res) => {
