@@ -32,6 +32,28 @@ describe("extrato-import", () => {
       buildDedupKey("2025-02-03", "PIX ENVIADO", "1", 50, "D", 1),
     );
   });
+
+  it("parseia CSV Gendo transacoes.csv", () => {
+    const csv = `"Data";"Vencimento";"Comanda";"Responsável";"Categoria";"Descrição";"Realizado";"Valor"
+"10/08/2026";"25/08/2026";"0";"--";"Bens de pequeno valor";"Iplus";"Não";"-216,85"
+"09/08/2026";"09/08/2026";"53";"--";"Pagamento";"Permuta";"Sim";"145,00"
+"09/08/2026";"09/08/2026";"0";"--";"Combustível";"Abastecimento carro";"Sim";"-100,00"
+"05/08/2026";"05/08/2026";"12";"--";"Taxas";"Taxa Cartão";"Sim";"-4,88"`;
+    const r = parseExtratoCsv(csv);
+    expect(r.formato).toBe("gendo-transacoes");
+    expect(r.header).toEqual({ agencia: "gendo", conta: "transacoes" });
+    expect(r.ignoradasNaoRealizadas).toBe(1);
+    expect(r.rows).toHaveLength(3);
+    expect(r.rows[0]).toMatchObject({
+      data: "2026-08-09",
+      tipo: "C",
+      valor: 145,
+      documento: "comanda:53",
+    });
+    expect(r.rows[1].tipo).toBe("D");
+    expect(r.rows[1].valor).toBe(100);
+    expect(r.rows[2].valor).toBe(4.88);
+  });
 });
 
 describe("extrato-conciliacao", () => {

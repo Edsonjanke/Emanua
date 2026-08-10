@@ -104,7 +104,7 @@ export async function registerRoutes(app: Express) {
 
   app.post("/api/extrato/import", authorize("admin", "gestor"), async (req, res) => {
     try {
-      const { agencia, conta, nome, rows, saldoInicialData, saldoInicialValor } = req.body ?? {};
+      const { agencia, conta, nome, rows, saldoInicialData, saldoInicialValor, ativar } = req.body ?? {};
       if (!agencia || !conta || !Array.isArray(rows)) {
         return res.status(400).json({ message: "agencia, conta e rows obrigatórios" });
       }
@@ -120,36 +120,61 @@ export async function registerRoutes(app: Express) {
             nome: nome || `Conta ${agencia}/${conta}`,
             agencia: String(agencia),
             conta: String(conta),
+            ativo: ativar !== false,
             saldoInicialData: saldoInicialData || null,
             saldoInicialValor: saldoInicialValor != null ? String(saldoInicialValor) : null,
           })
           .returning();
-      } else if (saldoInicialData != null || saldoInicialValor != null) {
+      } else if (saldoInicialData != null || saldoInicialValor != null || ativar !== false) {
         await db
           .update(bancoContas)
           .set({
+            ...(nome ? { nome: String(nome) } : {}),
+            ...(ativar !== false ? { ativo: true } : {}),
             ...(saldoInicialData != null ? { saldoInicialData: String(saldoInicialData) } : {}),
             ...(saldoInicialValor != null ? { saldoInicialValor: String(saldoInicialValor) } : {}),
           })
           .where(eq(bancoContas.id, bc.id));
       }
 
+      if (ativar !== false) {
+        await db.update(bancoContas).set({ ativo: false }).where(ne(bancoContas.id, bc.id));
+        await db.update(bancoContas).set({ ativo: true }).where(eq(bancoContas.id, bc.id));
+      }
+
+      const BATCH = 100;
+      const values = rows.map((r: any) => ({
+        contaId: bc.id,
+        data: r.data,
+        historico: r.historico,
+        documento: r.documento ?? null,
+        valor: String(r.valor),
+        tipo: r.tipo,
+        ocorrencia: r.ocorrencia ?? 1,
+        dedupKey: r.dedupKey,
+      }));
+
       let inseridas = 0;
-      for (const r of rows) {
+      for (let i = 0; i < values.length; i += BATCH) {
+        const chunk = values.slice(i, i + BATCH);
         try {
-          await db.insert(bancoMovimentacoes).values({
-            contaId: bc.id,
-            data: r.data,
-            historico: r.historico,
-            documento: r.documento ?? null,
-            valor: String(r.valor),
-            tipo: r.tipo,
-            ocorrencia: r.ocorrencia ?? 1,
-            dedupKey: r.dedupKey,
-          });
-          inseridas++;
+          const r = await db
+            .insert(bancoMovimentacoes)
+            .values(chunk)
+            .onConflictDoNothing({
+              target: [bancoMovimentacoes.contaId, bancoMovimentacoes.dedupKey],
+            })
+            .returning({ id: bancoMovimentacoes.id });
+          inseridas += r.length;
         } catch {
-          /* duplicate dedupKey */
+          for (const row of chunk) {
+            try {
+              await db.insert(bancoMovimentacoes).values(row);
+              inseridas++;
+            } catch {
+              /* duplicate */
+            }
+          }
         }
       }
       res.json({ contaId: bc.id, inseridas, total: rows.length });
@@ -639,18 +664,18 @@ export async function registerRoutes(app: Express) {
       const incluirProLabore = !["0", "false"].includes(String(req.query.incluirProLabore ?? "1").toLowerCase());
       const deFoiDefault = !isoRe.test(String(req.query.de ?? ""));
 
-      // Prefere planilha consolidada quando existir.
+      // Conta ativa (importação de extrato/planilha desativa as demais).
       let [conta] = await db
         .select()
         .from(bancoContas)
-        .where(and(eq(bancoContas.agencia, "planilha"), eq(bancoContas.conta, "planilha-consolidada")))
+        .where(eq(bancoContas.ativo, true))
+        .orderBy(desc(bancoContas.createdAt))
         .limit(1);
       if (!conta) {
         [conta] = await db
           .select()
           .from(bancoContas)
-          .where(eq(bancoContas.ativo, true))
-          .orderBy(asc(bancoContas.createdAt))
+          .where(and(eq(bancoContas.agencia, "planilha"), eq(bancoContas.conta, "planilha-consolidada")))
           .limit(1);
       }
       const movs = conta

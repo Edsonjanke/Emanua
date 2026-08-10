@@ -65,19 +65,30 @@ export default function FluxoTab() {
         header: { agencia: string; conta: string } | null;
         rows: any[];
         erros: string[];
+        formato?: string;
+        ignoradasNaoRealizadas?: number;
       }>("/api/extrato/parse-csv", file);
-      if (!parsed.header) throw new Error("CSV sem header de agência/conta");
-      return api.post("/api/extrato/import", {
+      if (!parsed.header) throw new Error("CSV sem header de agência/conta (ou formato não reconhecido)");
+      const r = await api.post<{ inseridas: number; total: number }>("/api/extrato/import", {
         agencia: parsed.header.agencia,
         conta: parsed.header.conta,
-        nome: "Conta corrente",
+        nome:
+          parsed.formato === "gendo-transacoes"
+            ? "Gendo — Transações"
+            : `Conta ${parsed.header.agencia}/${parsed.header.conta}`,
         rows: parsed.rows,
         saldoInicialData: saldoInicial.data || undefined,
         saldoInicialValor: saldoInicial.valor ? Number(saldoInicial.valor) : undefined,
+        ativar: true,
       });
+      return { ...r, formato: parsed.formato, ignoradasNaoRealizadas: parsed.ignoradasNaoRealizadas ?? 0 };
     },
     onSuccess: (r: any) => {
-      toast.success(`Importadas ${r.inseridas} de ${r.total} linhas`);
+      const extra =
+        r.formato === "gendo-transacoes" && r.ignoradasNaoRealizadas
+          ? ` · ${r.ignoradasNaoRealizadas} não realizadas ignoradas`
+          : "";
+      toast.success(`Importadas ${r.inseridas} de ${r.total} linhas${extra}`);
       qc.invalidateQueries({ queryKey: ["fluxo"] });
     },
     onError: (e: any) => toast.error(e.message),
@@ -182,6 +193,9 @@ export default function FluxoTab() {
             e.target.value = "";
           }}
         />
+        <span className="text-[10px] text-[var(--text-muted)] hidden sm:inline">
+          CSV banco ou Gendo (transacoes.csv)
+        </span>
         <button
           type="button"
           onClick={() => setModal({ tipo: "receita" })}
