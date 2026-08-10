@@ -206,7 +206,7 @@ export default function ImportPlanilhaModal({
             onClick={importar}
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
           >
-            {busy ? "Importando…" : "Importar"}
+            {busy ? "Importando… aguarde" : "Importar"}
           </button>
         </div>
       </div>

@@ -294,11 +294,17 @@ export async function registerRoutes(app: Express) {
         contasCriadas: [] as string[],
       };
 
-      const contaIds = new Map<string, string>();
-      async function ensureConta(nome: string): Promise<string> {
-        // Uma conta consolidada: o Fluxo lê a conta ativa; a origem fica no histórico.
+      const BATCH = 100;
+      function chunks<T>(arr: T[]): T[][] {
+        const out: T[][] = [];
+        for (let i = 0; i < arr.length; i += BATCH) out.push(arr.slice(i, i + BATCH));
+        return out;
+      }
+
+      // Uma conta consolidada: o Fluxo lê a conta ativa; a origem fica no histórico.
+      let contaId: string | null = null;
+      if (opts.extrato) {
         const consolidado = "Planilha consolidada";
-        if (contaIds.has(consolidado)) return contaIds.get(consolidado)!;
         const slug = "planilha-consolidada";
         const [existing] = await db
           .select()
@@ -306,67 +312,110 @@ export async function registerRoutes(app: Express) {
           .where(and(eq(bancoContas.agencia, "planilha"), eq(bancoContas.conta, slug)))
           .limit(1);
         if (existing) {
-          contaIds.set(consolidado, existing.id);
-          return existing.id;
+          contaId = existing.id;
+        } else {
+          const datas = rows.map((r) => r.data).sort();
+          const primeira = datas[0];
+          let ancoraData: string | null = null;
+          if (primeira) {
+            const d = new Date(primeira + "T00:00:00Z");
+            d.setUTCDate(d.getUTCDate() - 1);
+            ancoraData = d.toISOString().slice(0, 10);
+          }
+          const [created] = await db
+            .insert(bancoContas)
+            .values({
+              nome: consolidado,
+              agencia: "planilha",
+              conta: slug,
+              ativo: true,
+              saldoInicialData: ancoraData,
+              saldoInicialValor: "0",
+            })
+            .returning();
+          result.contasCriadas.push(consolidado);
+          contaId = created.id;
         }
-        const datas = rows.map((r) => r.data).sort();
-        const primeira = datas[0];
-        let ancoraData: string | null = null;
-        if (primeira) {
-          const d = new Date(primeira + "T00:00:00Z");
-          d.setUTCDate(d.getUTCDate() - 1);
-          ancoraData = d.toISOString().slice(0, 10);
-        }
-        const [created] = await db
-          .insert(bancoContas)
-          .values({
-            nome: consolidado,
-            agencia: "planilha",
-            conta: slug,
-            ativo: true,
-            saldoInicialData: ancoraData,
-            saldoInicialValor: "0",
-          })
-          .returning();
-        result.contasCriadas.push(`${consolidado} (origem: ${nome})`);
-        contaIds.set(consolidado, created.id);
-        return created.id;
       }
 
-      // Prefetch existentes para dedup de receita/despesa
-      const receitasExist = opts.receitas
-        ? await db.select({ data: receitasDia.data, valor: receitasDia.valor, observacao: receitasDia.observacao }).from(receitasDia)
-        : [];
-      const receitaKeys = new Set(
-        receitasExist.map((r) => `${r.data}|${Number(r.valor).toFixed(2)}|${(r.observacao ?? "").slice(0, 120)}`),
-      );
+      const [receitasExist, cpsExist, movsExist] = await Promise.all([
+        opts.receitas
+          ? db
+              .select({
+                data: receitasDia.data,
+                valor: receitasDia.valor,
+                observacao: receitasDia.observacao,
+              })
+              .from(receitasDia)
+          : Promise.resolve([]),
+        opts.despesas
+          ? db
+              .select({
+                dataVencimento: contasPagar.dataVencimento,
+                valor: contasPagar.valor,
+                descricao: contasPagar.descricao,
+              })
+              .from(contasPagar)
+          : Promise.resolve([]),
+        opts.extrato && contaId
+          ? db
+              .select({ dedupKey: bancoMovimentacoes.dedupKey })
+              .from(bancoMovimentacoes)
+              .where(eq(bancoMovimentacoes.contaId, contaId))
+          : Promise.resolve([]),
+      ]);
 
-      const cpsExist = opts.despesas
-        ? await db
-            .select({
-              dataVencimento: contasPagar.dataVencimento,
-              valor: contasPagar.valor,
-              descricao: contasPagar.descricao,
-            })
-            .from(contasPagar)
-        : [];
+      const receitaKeys = new Set(
+        receitasExist.map(
+          (r) => `${r.data}|${Number(r.valor).toFixed(2)}|${(r.observacao ?? "").slice(0, 120)}`,
+        ),
+      );
       const cpKeys = new Set(
         cpsExist.map((c) => `${c.dataVencimento}|${Number(c.valor).toFixed(2)}|${c.descricao}`),
       );
+      const movKeys = new Set(movsExist.map((m) => m.dedupKey));
+
+      const movValues: {
+        contaId: string;
+        data: string;
+        historico: string;
+        documento: string | null;
+        valor: string;
+        tipo: "C" | "D";
+        ocorrencia: number;
+        dedupKey: string;
+        prolaboreComentario: string | null;
+        prolaboreOverride?: string;
+      }[] = [];
+      const receitaValues: {
+        data: string;
+        valor: string;
+        forma: "dinheiro" | "pix" | "cartao";
+        observacao: string | null;
+      }[] = [];
+      const despesaValues: {
+        descricao: string;
+        valor: string;
+        dataVencimento: string;
+        dataPagamento: string;
+        status: "pago";
+        categoria: string;
+        observacoes: string;
+      }[] = [];
 
       for (const row of rows) {
         const skipInterna = opts.skipTransferenciasInternas && isTransferenciaInterna(row.categoria);
 
-        if (opts.extrato) {
-          const contaId = await ensureConta(row.conta);
-          const valor = row.tipo === "Entrada" ? row.entrada : row.saida;
-          const tipo = row.tipo === "Entrada" ? "C" : "D";
-          const historico = `[${row.conta}] ${row.descricao}`.toUpperCase().slice(0, 500);
-          try {
-            await db.insert(bancoMovimentacoes).values({
+        if (opts.extrato && contaId) {
+          if (movKeys.has(row.dedupKey)) {
+            result.extratoDuplicados++;
+          } else {
+            const valor = row.tipo === "Entrada" ? row.entrada : row.saida;
+            const tipo = row.tipo === "Entrada" ? ("C" as const) : ("D" as const);
+            movValues.push({
               contaId,
               data: row.data,
-              historico,
+              historico: `[${row.conta}] ${row.descricao}`.toUpperCase().slice(0, 500),
               documento: row.fonte,
               valor: String(valor),
               tipo,
@@ -375,9 +424,7 @@ export async function registerRoutes(app: Express) {
               prolaboreComentario: row.observacao,
               ...(skipInterna && tipo === "D" ? { prolaboreOverride: "excluir" } : {}),
             });
-            result.extratoInseridos++;
-          } catch {
-            result.extratoDuplicados++;
+            movKeys.add(row.dedupKey);
           }
         }
 
@@ -388,14 +435,13 @@ export async function registerRoutes(app: Express) {
           if (receitaKeys.has(key)) {
             result.receitasDuplicadas++;
           } else {
-            await db.insert(receitasDia).values({
+            receitaValues.push({
               data: row.data,
               valor: String(row.entrada),
               forma,
               observacao: obs || null,
             });
             receitaKeys.add(key);
-            result.receitasInseridas++;
           }
         }
 
@@ -405,7 +451,7 @@ export async function registerRoutes(app: Express) {
           if (cpKeys.has(key)) {
             result.despesasDuplicadas++;
           } else {
-            await db.insert(contasPagar).values({
+            despesaValues.push({
               descricao: desc,
               valor: String(row.saida),
               dataVencimento: row.data,
@@ -418,10 +464,35 @@ export async function registerRoutes(app: Express) {
                 .slice(0, 500),
             });
             cpKeys.add(key);
-            result.despesasInseridas++;
           }
         }
       }
+
+      let movIns = 0;
+      for (const chunk of chunks(movValues)) {
+        const r = await db
+          .insert(bancoMovimentacoes)
+          .values(chunk)
+          .onConflictDoNothing({
+            target: [bancoMovimentacoes.contaId, bancoMovimentacoes.dedupKey],
+          })
+          .returning({ id: bancoMovimentacoes.id });
+        movIns += r.length;
+      }
+      let recIns = 0;
+      for (const chunk of chunks(receitaValues)) {
+        const r = await db.insert(receitasDia).values(chunk).returning({ id: receitasDia.id });
+        recIns += r.length;
+      }
+      let despIns = 0;
+      for (const chunk of chunks(despesaValues)) {
+        const r = await db.insert(contasPagar).values(chunk).returning({ id: contasPagar.id });
+        despIns += r.length;
+      }
+      result.extratoInseridos = movIns;
+      result.extratoDuplicados += Math.max(0, movValues.length - movIns);
+      result.receitasInseridas = recIns;
+      result.despesasInseridas = despIns;
 
       res.json(result);
     } catch (e: any) {
