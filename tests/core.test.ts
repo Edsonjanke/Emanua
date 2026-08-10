@@ -1,0 +1,84 @@
+import { describe, expect, it } from "vitest";
+import { parseExtratoCsv, buildDedupKey } from "@shared/extrato-import";
+import { sugerirConciliacao } from "@shared/extrato-conciliacao";
+import { classifyProLabore, resolveDebitoNatureza } from "@shared/prolabore";
+import {
+  calcMinimoSobrevivencia,
+  calcPontoEquilibrio,
+  sumReceitasMes,
+} from "@shared/minimo-sobrevivencia";
+import { parseBrNumber, parseBrDate } from "@shared/parse-br";
+
+describe("parse-br", () => {
+  it("parseia número BR", () => {
+    expect(parseBrNumber("1.234,56")).toBe(1234.56);
+  });
+  it("parseia data BR", () => {
+    expect(parseBrDate("10/08/2026")).toBe("2026-08-10");
+  });
+});
+
+describe("extrato-import", () => {
+  it("parseia CSV Viacredi-like", () => {
+    const csv = `16;16;758450;;
+03/02/2025;CR.DESC. DE TITULO;158.966;11.746,72;C
+03/02/2025;PIX ENVIADO;1;50,00;D`;
+    const r = parseExtratoCsv(csv);
+    expect(r.header).toEqual({ agencia: "16", conta: "758450" });
+    expect(r.rows).toHaveLength(2);
+    expect(r.rows[0].tipo).toBe("C");
+    expect(r.rows[0].valor).toBe(11746.72);
+    expect(r.rows[1].dedupKey).toBe(
+      buildDedupKey("2025-02-03", "PIX ENVIADO", "1", 50, "D", 1),
+    );
+  });
+});
+
+describe("extrato-conciliacao", () => {
+  it("sugere match por valor e data", () => {
+    const sug = sugerirConciliacao(
+      [{ id: "m1", data: "2026-08-10", valor: 100, tipo: "C" }],
+      [{ id: "r1", valor: 100, dataVencimento: "2026-08-12", status: "aberta" }],
+    );
+    expect(sug).toHaveLength(1);
+    expect(sug[0].recebivelId).toBe("r1");
+  });
+});
+
+describe("prolabore", () => {
+  it("classifica por regra", () => {
+    expect(
+      classifyProLabore("PIX ATAIZE SILVA", [{ socio: "ataize", padrao: "ATAIZE", ordem: 1 }]),
+    ).toBe("ataize");
+  });
+  it("resolve override manual", () => {
+    const r = resolveDebitoNatureza("qualquer", "ataize", []);
+    expect(r.natureza).toBe("pro_labore");
+    expect(r.socio).toBe("ataize");
+  });
+});
+
+describe("minimo-sobrevivencia", () => {
+  it("soma mínimo", () => {
+    expect(calcMinimoSobrevivencia({ contasPagarMes: 100, custosFixos: 50, custosVariaveis: 25 })).toBe(
+      175,
+    );
+  });
+  it("calcula PE", () => {
+    expect(calcPontoEquilibrio(1000, 50)).toBe(2000);
+    expect(calcPontoEquilibrio(1000, 0)).toBeNull();
+  });
+  it("soma receitas do mês", () => {
+    expect(
+      sumReceitasMes(
+        [
+          { data: "2026-08-01", valor: 100 },
+          { data: "2026-08-15", valor: 50.5 },
+          { data: "2026-07-01", valor: 999 },
+        ],
+        2026,
+        8,
+      ),
+    ).toBe(150.5);
+  });
+});
