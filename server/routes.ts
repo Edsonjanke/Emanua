@@ -525,32 +525,55 @@ export async function registerRoutes(app: Express) {
 
       let movIns = 0;
       for (const chunk of chunks(movValues)) {
-        const r = await db
-          .insert(bancoMovimentacoes)
-          .values(chunk)
-          .onConflictDoNothing({
-            target: [bancoMovimentacoes.contaId, bancoMovimentacoes.dedupKey],
-          })
-          .returning({ id: bancoMovimentacoes.id });
-        movIns += r.length;
+        try {
+          const r = await db.insert(bancoMovimentacoes).values(chunk).returning({ id: bancoMovimentacoes.id });
+          movIns += r.length;
+        } catch (e: any) {
+          // Fallback linha a linha se o lote colidir (reimport concorrente)
+          if (!/unique|duplicate/i.test(String(e?.message ?? e))) throw e;
+          for (const row of chunk) {
+            try {
+              await db.insert(bancoMovimentacoes).values(row);
+              movIns++;
+            } catch {
+              result.extratoDuplicados++;
+            }
+          }
+        }
       }
       let recIns = 0;
       for (const chunk of chunks(receitaValues)) {
-        const r = await db
-          .insert(receitasDia)
-          .values(chunk)
-          .onConflictDoNothing({ target: receitasDia.importDedupKey })
-          .returning({ id: receitasDia.id });
-        recIns += r.length;
+        try {
+          const r = await db.insert(receitasDia).values(chunk).returning({ id: receitasDia.id });
+          recIns += r.length;
+        } catch (e: any) {
+          if (!/unique|duplicate/i.test(String(e?.message ?? e))) throw e;
+          for (const row of chunk) {
+            try {
+              await db.insert(receitasDia).values(row);
+              recIns++;
+            } catch {
+              result.receitasDuplicadas++;
+            }
+          }
+        }
       }
       let despIns = 0;
       for (const chunk of chunks(despesaValues)) {
-        const r = await db
-          .insert(contasPagar)
-          .values(chunk)
-          .onConflictDoNothing({ target: contasPagar.importDedupKey })
-          .returning({ id: contasPagar.id });
-        despIns += r.length;
+        try {
+          const r = await db.insert(contasPagar).values(chunk).returning({ id: contasPagar.id });
+          despIns += r.length;
+        } catch (e: any) {
+          if (!/unique|duplicate/i.test(String(e?.message ?? e))) throw e;
+          for (const row of chunk) {
+            try {
+              await db.insert(contasPagar).values(row);
+              despIns++;
+            } catch {
+              result.despesasDuplicadas++;
+            }
+          }
+        }
       }
       result.extratoInseridos = movIns;
       result.extratoDuplicados += Math.max(0, movValues.length - movIns);

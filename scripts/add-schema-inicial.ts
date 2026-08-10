@@ -70,9 +70,10 @@ async function main() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_contas_pagar_vencimento ON contas_pagar(data_vencimento)`);
   await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  await db.execute(sql`DROP INDEX IF EXISTS idx_contas_pagar_import_dedup`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_contas_pagar_import_dedup
-    ON contas_pagar (import_dedup_key) WHERE import_dedup_key IS NOT NULL
+    ON contas_pagar (import_dedup_key)
   `);
 
   await db.execute(sql`
@@ -105,9 +106,10 @@ async function main() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_receitas_dia_data ON receitas_dia(data)`);
   await db.execute(sql`ALTER TABLE receitas_dia ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  await db.execute(sql`DROP INDEX IF EXISTS idx_receitas_dia_import_dedup`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_receitas_dia_import_dedup
-    ON receitas_dia (import_dedup_key) WHERE import_dedup_key IS NOT NULL
+    ON receitas_dia (import_dedup_key)
   `);
 
   await db.execute(sql`

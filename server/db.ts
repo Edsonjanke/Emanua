@@ -29,14 +29,16 @@ export const db = drizzle(pool, { schema });
 export async function ensureSchemaPatches() {
   await db.execute(sql`ALTER TABLE receitas_dia ADD COLUMN IF NOT EXISTS import_dedup_key text`);
   await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  // Índice único sem predicado: ON CONFLICT (col) exige isso no Postgres.
+  // Vários NULL continuam permitidos.
+  await db.execute(sql`DROP INDEX IF EXISTS idx_receitas_dia_import_dedup`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_receitas_dia_import_dedup
     ON receitas_dia (import_dedup_key)
-    WHERE import_dedup_key IS NOT NULL
   `);
+  await db.execute(sql`DROP INDEX IF EXISTS idx_contas_pagar_import_dedup`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_contas_pagar_import_dedup
     ON contas_pagar (import_dedup_key)
-    WHERE import_dedup_key IS NOT NULL
   `);
 }
