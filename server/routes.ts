@@ -892,8 +892,14 @@ export async function registerRoutes(app: Express) {
               (c) => (c.dataPagamento || c.dataVencimento) === d,
             );
             if (receitaDiaRows.length || saidasPagas.length) {
+              const totalEnt = receitaDiaRows.reduce((s, r) => s + parseFloat(String(r.valor)), 0);
+              const totalSai = saidasPagas.reduce((s, c) => s + parseFloat(String(c.valor)), 0);
               dias.push({
                 data: d,
+                totalEntradas: round2(totalEnt),
+                totalSaidas: round2(totalSai),
+                saldoProjetado: saldoRealCorrente,
+                isPassado: true,
                 entradas: receitaDiaRows.map((x) => ({
                   id: x.id,
                   tipo: "receita" as const,
@@ -954,6 +960,10 @@ export async function registerRoutes(app: Express) {
           if (emitir && (d === hoje || abertasDia.length || saidasDia.length || receitasDoDia.length)) {
             dias.push({
               data: d,
+              totalEntradas: round2(totalEntradas),
+              totalSaidas: round2(totalSaidas),
+              saldoProjetado,
+              isHoje: d === hoje,
               entradas: [
                 ...abertasDia.map((x) => ({
                   id: x.id,
@@ -1019,6 +1029,8 @@ export async function registerRoutes(app: Express) {
           ? { id: conta.id, nome: conta.nome, agencia: conta.agencia, conta: conta.conta }
           : null,
         saldoRealHoje,
+        saldoProjetadoHoje:
+          serie.find((s) => s.data === hoje)?.saldoProjetado ?? saldoRealHoje,
         ultimaDataExtrato,
         aReceber30,
         aPagar30,

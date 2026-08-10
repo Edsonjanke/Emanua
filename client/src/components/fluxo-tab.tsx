@@ -26,6 +26,7 @@ import ImportPlanilhaModal from "@/components/import-planilha-modal";
 interface FluxoData {
   hoje: string;
   saldoRealHoje: number | null;
+  saldoProjetadoHoje?: number | null;
   ultimaDataExtrato: string | null;
   aReceber30: number;
   aPagar30: number;
@@ -176,8 +177,8 @@ export default function FluxoTab() {
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-end">
-        <div className="flex flex-col gap-1">
+      <div className="space-y-1">
+        <div className="flex flex-wrap gap-2 items-center">
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
@@ -186,91 +187,103 @@ export default function FluxoTab() {
           >
             {importMut.isPending ? "Importando CSV…" : "Importar CSV"}
           </button>
-          <span className="text-[10px] text-[var(--text-muted)] leading-tight px-0.5">
-            Gendo <em>transacoes.csv</em> ou extrato banco
-          </span>
+          <button
+            type="button"
+            onClick={() => setPlanilhaOpen(true)}
+            className="rounded-lg border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+          >
+            Importar planilha
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importMut.mutate(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setModal({ tipo: "receita" })}
+            className="rounded-lg border border-[var(--green)]/40 text-[var(--green)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+          >
+            + Receita
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal({ tipo: "pagar" })}
+            className="rounded-lg border border-[var(--red)]/40 text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+          >
+            + Despesa
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal({ tipo: "receber" })}
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+          >
+            + A receber
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              api.post("/api/extrato/reconciliar", {}).then((r: any) => {
+                toast.success(`${r.matches} conciliadas`);
+                refresh();
+              })
+            }
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+          >
+            Reconciliar
+          </button>
+          {d.ultimaDataExtrato && (
+            <span className="text-xs text-[var(--text-muted)] ml-2">
+              Extrato até {formatDateBR(d.ultimaDataExtrato)}
+            </span>
+          )}
+          <div className="flex gap-2 ml-auto text-xs items-center">
+            <label className="flex items-center gap-1.5 text-[var(--text-muted)]">
+              Âncora
+              <input
+                type="date"
+                className="rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5"
+                value={saldoInicial.data}
+                onChange={(e) => setSaldoInicial((s) => ({ ...s, data: e.target.value }))}
+              />
+              <input
+                type="number"
+                placeholder="Saldo"
+                className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5"
+                value={saldoInicial.valor}
+                onChange={(e) => setSaldoInicial((s) => ({ ...s, valor: e.target.value }))}
+              />
+            </label>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setPlanilhaOpen(true)}
-          className="rounded-lg border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-        >
-          Importar planilha
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) importMut.mutate(f);
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => setModal({ tipo: "receita" })}
-          className="rounded-lg border border-[var(--green)]/40 text-[var(--green)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-        >
-          + Receita
-        </button>
-        <button
-          type="button"
-          onClick={() => setModal({ tipo: "pagar" })}
-          className="rounded-lg border border-[var(--red)]/40 text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-        >
-          + Despesa
-        </button>
-        <button
-          type="button"
-          onClick={() => setModal({ tipo: "receber" })}
-          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-        >
-          + A receber
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            api.post("/api/extrato/reconciliar", {}).then((r: any) => {
-              toast.success(`${r.matches} conciliadas`);
-              refresh();
-            })
-          }
-          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-        >
-          Reconciliar
-        </button>
-        {d.ultimaDataExtrato && (
-          <span className="text-xs text-[var(--text-muted)] ml-2">
-            Extrato até {formatDateBR(d.ultimaDataExtrato)}
-          </span>
-        )}
-        <div className="flex gap-2 ml-auto text-xs items-center">
-          <label className="flex items-center gap-1.5 text-[var(--text-muted)]">
-            Âncora
-            <input
-              type="date"
-              className="rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5"
-              value={saldoInicial.data}
-              onChange={(e) => setSaldoInicial((s) => ({ ...s, data: e.target.value }))}
-            />
-            <input
-              type="number"
-              placeholder="Saldo"
-              className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5"
-              value={saldoInicial.valor}
-              onChange={(e) => setSaldoInicial((s) => ({ ...s, valor: e.target.value }))}
-            />
-          </label>
-        </div>
+        <p className="text-[10px] text-[var(--text-muted)] leading-tight">
+          Importar CSV: Gendo <em>transacoes.csv</em> ou extrato banco
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi
           label="Saldo real hoje"
           value={d.saldoRealHoje != null ? format(d.saldoRealHoje) : "— configure âncora"}
           note={d.conta?.nome}
+        />
+        <Kpi
+          label="Saldo projetado"
+          value={
+            d.saldoProjetadoHoje != null
+              ? format(d.saldoProjetadoHoje)
+              : d.saldoRealHoje != null
+                ? format(d.saldoRealHoje)
+                : "—"
+          }
+          tone="accent"
+          note="caixa após previsões de hoje"
         />
         <Kpi label="A receber 30d" value={format(d.aReceber30)} tone="green" note="recebíveis abertos" />
         <Kpi label="A pagar 30d" value={format(d.aPagar30)} tone="red" />
@@ -375,10 +388,32 @@ export default function FluxoTab() {
           )}
           {d.dias.map((dia) => (
             <div key={dia.data} className="border-b border-[var(--border)] pb-3 last:border-0">
-              <p className="text-sm font-medium mb-1">
-                {formatDateBR(dia.data)}{" "}
-                <span className="text-[var(--text-muted)] font-normal">{formatWeekday(dia.data)}</span>
-              </p>
+              <div className="flex items-center gap-2 flex-wrap text-sm mb-1">
+                <p className="font-medium">
+                  {formatDateBR(dia.data)}{" "}
+                  <span className="text-[var(--text-muted)] font-normal">{formatWeekday(dia.data)}</span>
+                </p>
+                {(dia.isHoje || dia.data === d.hoje) && (
+                  <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
+                    hoje
+                  </span>
+                )}
+                {dia.totalEntradas > 0 && (
+                  <span className="tabular-nums text-[var(--green)] text-xs">+{format(dia.totalEntradas)}</span>
+                )}
+                {dia.totalSaidas > 0 && (
+                  <span className="tabular-nums text-[var(--red)] text-xs">−{format(dia.totalSaidas)}</span>
+                )}
+                {dia.saldoProjetado != null && (
+                  <span
+                    className={`ml-auto tabular-nums text-xs ${
+                      dia.saldoProjetado < 0 ? "text-[var(--red)] font-semibold" : "text-[var(--accent)]"
+                    }`}
+                  >
+                    {dia.isPassado ? "saldo" : "saldo proj."} {format(dia.saldoProjetado)}
+                  </span>
+                )}
+              </div>
               <ul className="text-sm space-y-1">
                 {dia.entradas?.map((e: any) => (
                   <li key={e.id || `e-${e.clienteNome}-${e.valor}`} className="flex items-center gap-2 group">
@@ -509,10 +544,16 @@ function Kpi({
   label: string;
   value: string;
   note?: string;
-  tone?: "green" | "red";
+  tone?: "green" | "red" | "accent";
 }) {
   const color =
-    tone === "green" ? "text-[var(--green)]" : tone === "red" ? "text-[var(--red)]" : "text-white";
+    tone === "green"
+      ? "text-[var(--green)]"
+      : tone === "red"
+        ? "text-[var(--red)]"
+        : tone === "accent"
+          ? "text-[var(--accent)]"
+          : "text-white";
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
       <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
