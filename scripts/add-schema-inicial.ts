@@ -63,11 +63,17 @@ async function main() {
       status text NOT NULL DEFAULT 'pendente',
       categoria text,
       observacoes text,
+      import_dedup_key text,
       recorrencia text,
       created_at timestamp NOT NULL DEFAULT now()
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_contas_pagar_vencimento ON contas_pagar(data_vencimento)`);
+  await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_contas_pagar_import_dedup
+    ON contas_pagar (import_dedup_key) WHERE import_dedup_key IS NOT NULL
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS recebiveis (
@@ -93,10 +99,16 @@ async function main() {
       valor decimal(12,2) NOT NULL,
       forma text NOT NULL,
       observacao text,
+      import_dedup_key text,
       created_at timestamp NOT NULL DEFAULT now()
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_receitas_dia_data ON receitas_dia(data)`);
+  await db.execute(sql`ALTER TABLE receitas_dia ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_receitas_dia_import_dedup
+    ON receitas_dia (import_dedup_key) WHERE import_dedup_key IS NOT NULL
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS custos_fixos (

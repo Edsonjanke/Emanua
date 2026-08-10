@@ -342,18 +342,22 @@ export async function registerRoutes(app: Express) {
         opts.receitas
           ? db
               .select({
+                id: receitasDia.id,
                 data: receitasDia.data,
                 valor: receitasDia.valor,
                 observacao: receitasDia.observacao,
+                importDedupKey: receitasDia.importDedupKey,
               })
               .from(receitasDia)
           : Promise.resolve([]),
         opts.despesas
           ? db
               .select({
+                id: contasPagar.id,
                 dataVencimento: contasPagar.dataVencimento,
                 valor: contasPagar.valor,
                 descricao: contasPagar.descricao,
+                importDedupKey: contasPagar.importDedupKey,
               })
               .from(contasPagar)
           : Promise.resolve([]),
@@ -365,14 +369,24 @@ export async function registerRoutes(app: Express) {
           : Promise.resolve([]),
       ]);
 
-      const receitaKeys = new Set(
-        receitasExist.map(
-          (r) => `${r.data}|${Number(r.valor).toFixed(2)}|${(r.observacao ?? "").slice(0, 120)}`,
-        ),
+      const receitaByDedup = new Set(
+        receitasExist.map((r) => r.importDedupKey).filter((k): k is string => !!k),
       );
-      const cpKeys = new Set(
-        cpsExist.map((c) => `${c.dataVencimento}|${Number(c.valor).toFixed(2)}|${c.descricao}`),
+      const receitaBySoft = new Map<string, string>(); // softKey → id (só sem dedup ainda)
+      for (const r of receitasExist) {
+        const soft = `${r.data}|${Number(r.valor).toFixed(2)}|${(r.observacao ?? "").slice(0, 120)}`;
+        if (!r.importDedupKey) receitaBySoft.set(soft, r.id);
+      }
+
+      const cpByDedup = new Set(
+        cpsExist.map((c) => c.importDedupKey).filter((k): k is string => !!k),
       );
+      const cpBySoft = new Map<string, string>();
+      for (const c of cpsExist) {
+        const soft = `${c.dataVencimento}|${Number(c.valor).toFixed(2)}|${c.descricao}`;
+        if (!c.importDedupKey) cpBySoft.set(soft, c.id);
+      }
+
       const movKeys = new Set(movsExist.map((m) => m.dedupKey));
 
       const movValues: {
@@ -392,6 +406,7 @@ export async function registerRoutes(app: Express) {
         valor: string;
         forma: "dinheiro" | "pix" | "cartao";
         observacao: string | null;
+        importDedupKey: string;
       }[] = [];
       const despesaValues: {
         descricao: string;
@@ -401,9 +416,13 @@ export async function registerRoutes(app: Express) {
         status: "pago";
         categoria: string;
         observacoes: string;
+        importDedupKey: string;
       }[] = [];
+      const receitaBackfill: { id: string; key: string }[] = [];
+      const cpBackfill: { id: string; key: string }[] = [];
 
       for (const row of rows) {
+        if (!row.dedupKey) continue;
         const skipInterna = opts.skipTransferenciasInternas && isTransferenciaInterna(row.categoria);
 
         if (opts.extrato && contaId) {
@@ -431,25 +450,38 @@ export async function registerRoutes(app: Express) {
         if (opts.receitas && row.tipo === "Entrada" && isReceitaOperacional(row.categoria) && !skipInterna) {
           const forma = inferFormaReceita(row.conta, row.descricao);
           const obs = [row.descricao, row.subcategoria, row.observacao].filter(Boolean).join(" · ").slice(0, 500);
-          const key = `${row.data}|${row.entrada.toFixed(2)}|${obs.slice(0, 120)}`;
-          if (receitaKeys.has(key)) {
+          const soft = `${row.data}|${row.entrada.toFixed(2)}|${obs.slice(0, 120)}`;
+
+          if (receitaByDedup.has(row.dedupKey)) {
             result.receitasDuplicadas++;
+          } else if (receitaBySoft.has(soft)) {
+            result.receitasDuplicadas++;
+            receitaBackfill.push({ id: receitaBySoft.get(soft)!, key: row.dedupKey });
+            receitaBySoft.delete(soft);
+            receitaByDedup.add(row.dedupKey);
           } else {
             receitaValues.push({
               data: row.data,
               valor: String(row.entrada),
               forma,
               observacao: obs || null,
+              importDedupKey: row.dedupKey,
             });
-            receitaKeys.add(key);
+            receitaByDedup.add(row.dedupKey);
           }
         }
 
         if (opts.despesas && row.tipo === "Saida" && !skipInterna) {
           const desc = row.descricao.slice(0, 200);
-          const key = `${row.data}|${row.saida.toFixed(2)}|${desc}`;
-          if (cpKeys.has(key)) {
+          const soft = `${row.data}|${row.saida.toFixed(2)}|${desc}`;
+
+          if (cpByDedup.has(row.dedupKey)) {
             result.despesasDuplicadas++;
+          } else if (cpBySoft.has(soft)) {
+            result.despesasDuplicadas++;
+            cpBackfill.push({ id: cpBySoft.get(soft)!, key: row.dedupKey });
+            cpBySoft.delete(soft);
+            cpByDedup.add(row.dedupKey);
           } else {
             despesaValues.push({
               descricao: desc,
@@ -462,10 +494,33 @@ export async function registerRoutes(app: Express) {
                 .filter(Boolean)
                 .join(" · ")
                 .slice(0, 500),
+              importDedupKey: row.dedupKey,
             });
-            cpKeys.add(key);
+            cpByDedup.add(row.dedupKey);
           }
         }
+      }
+
+      // Marca dedup em lançamentos antigos (import sem chave) para o próximo reimport.
+      for (const chunk of chunks(receitaBackfill)) {
+        await Promise.all(
+          chunk.map((b) =>
+            db
+              .update(receitasDia)
+              .set({ importDedupKey: b.key })
+              .where(and(eq(receitasDia.id, b.id), sql`${receitasDia.importDedupKey} IS NULL`)),
+          ),
+        );
+      }
+      for (const chunk of chunks(cpBackfill)) {
+        await Promise.all(
+          chunk.map((b) =>
+            db
+              .update(contasPagar)
+              .set({ importDedupKey: b.key })
+              .where(and(eq(contasPagar.id, b.id), sql`${contasPagar.importDedupKey} IS NULL`)),
+          ),
+        );
       }
 
       let movIns = 0;
@@ -481,18 +536,28 @@ export async function registerRoutes(app: Express) {
       }
       let recIns = 0;
       for (const chunk of chunks(receitaValues)) {
-        const r = await db.insert(receitasDia).values(chunk).returning({ id: receitasDia.id });
+        const r = await db
+          .insert(receitasDia)
+          .values(chunk)
+          .onConflictDoNothing({ target: receitasDia.importDedupKey })
+          .returning({ id: receitasDia.id });
         recIns += r.length;
       }
       let despIns = 0;
       for (const chunk of chunks(despesaValues)) {
-        const r = await db.insert(contasPagar).values(chunk).returning({ id: contasPagar.id });
+        const r = await db
+          .insert(contasPagar)
+          .values(chunk)
+          .onConflictDoNothing({ target: contasPagar.importDedupKey })
+          .returning({ id: contasPagar.id });
         despIns += r.length;
       }
       result.extratoInseridos = movIns;
       result.extratoDuplicados += Math.max(0, movValues.length - movIns);
       result.receitasInseridas = recIns;
+      result.receitasDuplicadas += Math.max(0, receitaValues.length - recIns);
       result.despesasInseridas = despIns;
+      result.despesasDuplicadas += Math.max(0, despesaValues.length - despIns);
 
       res.json(result);
     } catch (e: any) {

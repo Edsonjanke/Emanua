@@ -4,7 +4,7 @@ import cors from "cors";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { createServer } from "http";
-import { pool } from "./db";
+import { pool, ensureSchemaPatches } from "./db";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic } from "./vite";
 import type { UserRole } from "@shared/schema";
@@ -61,6 +61,7 @@ app.use(
 );
 
 (async () => {
+  await ensureSchemaPatches();
   await registerRoutes(app);
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -59,9 +59,18 @@ export default function ImportPlanilhaModal({
         rows: parsed.rows,
         ...opts,
       });
-      toast.success(
-        `Extrato +${r.extratoInseridos} · Receitas +${r.receitasInseridas} · Despesas +${r.despesasInseridas}`,
-      );
+      const skipped =
+        (r.extratoDuplicados ?? 0) + (r.receitasDuplicadas ?? 0) + (r.despesasDuplicadas ?? 0);
+      const novos =
+        (r.extratoInseridos ?? 0) + (r.receitasInseridas ?? 0) + (r.despesasInseridas ?? 0);
+      if (novos === 0 && skipped > 0) {
+        toast.message(`Nada novo — ${skipped} já estavam importados`);
+      } else {
+        toast.success(
+          `Novos: extrato +${r.extratoInseridos} · receitas +${r.receitasInseridas} · despesas +${r.despesasInseridas}` +
+            (skipped ? ` · ${skipped} ignorados (já existiam)` : ""),
+        );
+      }
       onSaved();
     } catch (e: any) {
       toast.error(e.message);

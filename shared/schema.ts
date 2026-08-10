@@ -88,10 +88,15 @@ export const contasPagar = pgTable(
     status: text("status").notNull().default("pendente").$type<"pendente" | "pago" | "vencido">(),
     categoria: text("categoria"),
     observacoes: text("observacoes"),
+    /** Chave estável da planilha — evita duplicar no reimport. */
+    importDedupKey: text("import_dedup_key"),
     recorrencia: text("recorrencia").$type<"mensal" | null>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => [index("idx_contas_pagar_vencimento").on(t.dataVencimento)],
+  (t) => [
+    index("idx_contas_pagar_vencimento").on(t.dataVencimento),
+    uniqueIndex("idx_contas_pagar_import_dedup").on(t.importDedupKey),
+  ],
 );
 export const insertContaPagarSchema = createInsertSchema(contasPagar).omit({
   id: true,
@@ -136,9 +141,14 @@ export const receitasDia = pgTable(
     valor: decimal("valor", { precision: 12, scale: 2 }).notNull(),
     forma: text("forma").notNull().$type<"dinheiro" | "pix" | "cartao">(),
     observacao: text("observacao"),
+    /** Chave estável da planilha — evita duplicar no reimport. */
+    importDedupKey: text("import_dedup_key"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => [index("idx_receitas_dia_data").on(t.data)],
+  (t) => [
+    index("idx_receitas_dia_data").on(t.data),
+    uniqueIndex("idx_receitas_dia_import_dedup").on(t.importDedupKey),
+  ],
 );
 export const insertReceitaDiaSchema = createInsertSchema(receitasDia).omit({
   id: true,
