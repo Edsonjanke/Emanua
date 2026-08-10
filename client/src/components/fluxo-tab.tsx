@@ -171,9 +171,10 @@ export default function FluxoTab() {
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:brightness-110"
+          disabled={importMut.isPending}
+          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
         >
-          Importar Extrato
+          {importMut.isPending ? "Importando CSV…" : "Importar CSV"}
         </button>
         <button
           type="button"
@@ -193,8 +194,8 @@ export default function FluxoTab() {
             e.target.value = "";
           }}
         />
-        <span className="text-[10px] text-[var(--text-muted)] hidden sm:inline">
-          CSV banco ou Gendo (transacoes.csv)
+        <span className="text-[10px] text-[var(--text-muted)] max-w-[10rem] leading-tight">
+          Gendo <em>transacoes.csv</em> ou extrato banco
         </span>
         <button
           type="button"
