@@ -9,6 +9,7 @@ interface ParseResult {
   rows: any[];
   preview: any[];
   erros: string[];
+  saldoInicial?: { data: string | null; valor: number | null; porConta: Record<string, number> };
   resumo: {
     total: number;
     entradas: number;
@@ -130,6 +131,12 @@ export default function ImportPlanilhaModal({
                   .join(" · ")}
               </p>
               <p>Aba: {parsed.sheetName}</p>
+              {parsed.saldoInicial?.valor != null && (
+                <p>
+                  Saldo inicial inferido: {format(parsed.saldoInicial.valor)}
+                  {parsed.saldoInicial.data ? ` (âncora ${formatDateBR(parsed.saldoInicial.data)})` : ""}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-4 text-sm">
@@ -163,7 +170,7 @@ export default function ImportPlanilhaModal({
                   checked={opts.skipTransferenciasInternas}
                   onChange={(e) => setOpts({ ...opts, skipTransferenciasInternas: e.target.checked })}
                 />
-                Ignorar transferências internas em receita/despesa
+                Ignorar transferências internas (extrato + receita/despesa)
               </label>
             </div>
 

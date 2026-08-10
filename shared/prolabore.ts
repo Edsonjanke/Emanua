@@ -43,7 +43,7 @@ export function resolveDebitoNatureza(
   regras: RegraClassificacao[],
 ): DebitoClassificado {
   if (override === "excluir") {
-    return { natureza: "empresa", socio: null, origem: "manual" };
+    return { natureza: "excluido", socio: null, origem: "manual" };
   }
   if (override && override !== "excluir") {
     return { natureza: "pro_labore", socio: override, origem: "manual" };

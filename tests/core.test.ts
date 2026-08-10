@@ -56,6 +56,9 @@ describe("prolabore", () => {
     expect(r.natureza).toBe("pro_labore");
     expect(r.socio).toBe("ataize");
   });
+  it("override excluir vira excluido", () => {
+    expect(resolveDebitoNatureza("x", "excluir", []).natureza).toBe("excluido");
+  });
 });
 
 describe("minimo-sobrevivencia", () => {

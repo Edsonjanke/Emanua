@@ -1,7 +1,7 @@
 import type { Express, RequestHandler } from "express";
 import bcrypt from "bcryptjs";
 import multer from "multer";
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { db } from "./db";
 import { requireAuth } from "./vite";
 import {
@@ -25,6 +25,7 @@ import {
   inferFormaReceita,
   isReceitaOperacional,
   isTransferenciaInterna,
+  inferSaldoInicialPlanilha,
   type PlanilhaMovRow,
 } from "@shared/planilha-movimentacoes-import";
 import {
@@ -261,9 +262,11 @@ export async function registerRoutes(app: Express) {
       try {
         if (!req.file?.buffer) return res.status(400).json({ message: "Arquivo obrigatório" });
         const parsed = parsePlanilhaMovimentacoesBuffer(req.file.buffer);
+        const saldoInicial = inferSaldoInicialPlanilha(parsed.rows);
         res.json({
           ...parsed,
           preview: parsed.rows.slice(0, 30),
+          saldoInicial,
         });
       } catch (e: any) {
         res.status(400).json({ message: e.message || "Falha ao ler planilha" });
@@ -306,6 +309,20 @@ export async function registerRoutes(app: Express) {
       if (opts.extrato) {
         const consolidado = "Planilha consolidada";
         const slug = "planilha-consolidada";
+        const inferred = inferSaldoInicialPlanilha(rows);
+        const datas = rows.map((r) => r.data).sort();
+        const primeira = datas[0];
+        let ancoraData = inferred.data;
+        if (!ancoraData && primeira) {
+          const d = new Date(primeira + "T12:00:00Z");
+          d.setUTCDate(d.getUTCDate() - 1);
+          ancoraData = d.toISOString().slice(0, 10);
+        }
+        const ancoraValor =
+          inferred.valor != null ? String(inferred.valor) : req.body?.saldoInicialValor != null
+            ? String(req.body.saldoInicialValor)
+            : "0";
+
         const [existing] = await db
           .select()
           .from(bancoContas)
@@ -313,15 +330,15 @@ export async function registerRoutes(app: Express) {
           .limit(1);
         if (existing) {
           contaId = existing.id;
+          await db
+            .update(bancoContas)
+            .set({
+              ativo: true,
+              saldoInicialData: ancoraData,
+              saldoInicialValor: ancoraValor,
+            })
+            .where(eq(bancoContas.id, contaId));
         } else {
-          const datas = rows.map((r) => r.data).sort();
-          const primeira = datas[0];
-          let ancoraData: string | null = null;
-          if (primeira) {
-            const d = new Date(primeira + "T00:00:00Z");
-            d.setUTCDate(d.getUTCDate() - 1);
-            ancoraData = d.toISOString().slice(0, 10);
-          }
           const [created] = await db
             .insert(bancoContas)
             .values({
@@ -330,11 +347,31 @@ export async function registerRoutes(app: Express) {
               conta: slug,
               ativo: true,
               saldoInicialData: ancoraData,
-              saldoInicialValor: "0",
+              saldoInicialValor: ancoraValor,
             })
             .returning();
           result.contasCriadas.push(consolidado);
           contaId = created.id;
+        }
+        // Fluxo usa a 1ª conta ativa — garante só a consolidada.
+        await db.update(bancoContas).set({ ativo: false }).where(ne(bancoContas.id, contaId));
+        await db.update(bancoContas).set({ ativo: true }).where(eq(bancoContas.id, contaId));
+
+        // Reimport: remove transferências internas que tenham entrado antes.
+        if (opts.skipTransferenciasInternas) {
+          const transferKeys = rows
+            .filter((r) => isTransferenciaInterna(r.categoria))
+            .map((r) => r.dedupKey);
+          if (transferKeys.length) {
+            for (let i = 0; i < transferKeys.length; i += BATCH) {
+              const chunk = transferKeys.slice(i, i + BATCH);
+              await db
+                .delete(bancoMovimentacoes)
+                .where(
+                  and(eq(bancoMovimentacoes.contaId, contaId), inArray(bancoMovimentacoes.dedupKey, chunk)),
+                );
+            }
+          }
         }
       }
 
@@ -426,7 +463,10 @@ export async function registerRoutes(app: Express) {
         const skipInterna = opts.skipTransferenciasInternas && isTransferenciaInterna(row.categoria);
 
         if (opts.extrato && contaId) {
-          if (movKeys.has(row.dedupKey)) {
+          // Em conta consolidada, transferência interna distorce o saldo (não se anula).
+          if (skipInterna) {
+            // ignorada de propósito
+          } else if (movKeys.has(row.dedupKey)) {
             result.extratoDuplicados++;
           } else {
             const valor = row.tipo === "Entrada" ? row.entrada : row.saida;
@@ -441,7 +481,6 @@ export async function registerRoutes(app: Express) {
               ocorrencia: 1,
               dedupKey: row.dedupKey,
               prolaboreComentario: row.observacao,
-              ...(skipInterna && tipo === "D" ? { prolaboreOverride: "excluir" } : {}),
             });
             movKeys.add(row.dedupKey);
           }
@@ -594,23 +633,42 @@ export async function registerRoutes(app: Express) {
     try {
       const hoje = hojeBrasil();
       const isoRe = /^\d{4}-\d{2}-\d{2}$/;
-      const de = isoRe.test(String(req.query.de ?? "")) ? String(req.query.de) : addDias(hoje, -30);
+      let de = isoRe.test(String(req.query.de ?? "")) ? String(req.query.de) : addDias(hoje, -30);
       const ate = isoRe.test(String(req.query.ate ?? "")) ? String(req.query.ate) : addDias(hoje, 60);
       const incluirDas = ["1", "true"].includes(String(req.query.incluirDas ?? "").toLowerCase());
       const incluirProLabore = !["0", "false"].includes(String(req.query.incluirProLabore ?? "1").toLowerCase());
+      const deFoiDefault = !isoRe.test(String(req.query.de ?? ""));
 
-      const [conta] = await db
+      // Prefere planilha consolidada quando existir.
+      let [conta] = await db
         .select()
         .from(bancoContas)
-        .where(eq(bancoContas.ativo, true))
-        .orderBy(asc(bancoContas.createdAt))
+        .where(and(eq(bancoContas.agencia, "planilha"), eq(bancoContas.conta, "planilha-consolidada")))
         .limit(1);
+      if (!conta) {
+        [conta] = await db
+          .select()
+          .from(bancoContas)
+          .where(eq(bancoContas.ativo, true))
+          .orderBy(asc(bancoContas.createdAt))
+          .limit(1);
+      }
       const movs = conta
         ? await db.select().from(bancoMovimentacoes).where(eq(bancoMovimentacoes.contaId, conta.id))
         : [];
       const regras = await db.select().from(proLaboreRegras);
       const ancoraData = conta?.saldoInicialData ?? null;
       const ancoraValor = conta?.saldoInicialValor != null ? parseFloat(String(conta.saldoInicialValor)) : null;
+
+      // Sem ?de= explícito: abre a janela até o início do extrato/âncora.
+      if (deFoiDefault) {
+        const datasMov = movs.map((m) => m.data);
+        const candidatas = [ancoraData, ...datasMov].filter((x): x is string => !!x);
+        if (candidatas.length) {
+          const inicio = candidatas.reduce((a, b) => (a < b ? a : b));
+          if (inicio < de) de = inicio;
+        }
+      }
 
       const realPorDia = new Map<string, ReturnType<typeof emptyDiaReal>>();
       let saldoRealHoje: number | null = ancoraValor;
@@ -623,10 +681,14 @@ export async function registerRoutes(app: Express) {
         if (m.tipo === "C") {
           dia.entradas += valor;
         } else {
-          dia.saidas += valor;
           const nat = resolveDebitoNatureza(m.historico, m.prolaboreOverride, regras);
-          if (nat.natureza === "pro_labore") dia.saidasProLabore += valor;
-          else dia.saidasEmpresa += valor;
+          if (nat.natureza === "excluido") {
+            // Mantém no cash do extrato, mas fora dos buckets de P&L.
+          } else {
+            dia.saidas += valor;
+            if (nat.natureza === "pro_labore") dia.saidasProLabore += valor;
+            else dia.saidasEmpresa += valor;
+          }
         }
         realPorDia.set(m.data, dia);
         if (saldoRealHoje != null && ancoraData != null && m.data > ancoraData && m.data <= hoje) {
@@ -647,6 +709,7 @@ export async function registerRoutes(app: Express) {
                 sql`${contasPagar.categoria} IS DISTINCT FROM 'DAS'`,
               ),
         );
+      const cpsPagos = await db.select().from(contasPagar).where(eq(contasPagar.status, "pago"));
 
       const receitas = await db.select().from(receitasDia);
 
@@ -695,21 +758,36 @@ export async function registerRoutes(app: Express) {
               receitaDia: round2(receitaDia),
               saldoReal: d >= (ancoraData ?? "") ? saldoRealCorrente : null,
             });
-          // Receitas passadas entram na timeline pra permitir CRUD
-          if (emitir && receitaDiaRows.length) {
-            dias.push({
-              data: d,
-              entradas: receitaDiaRows.map((x) => ({
-                id: x.id,
-                tipo: "receita" as const,
-                clienteNome: `Receita ${x.forma}`,
-                descricao: x.observacao,
-                valor: parseFloat(String(x.valor)),
-                forma: x.forma,
-                observacao: x.observacao,
-              })),
-              saidas: [],
-            });
+          // Receitas e despesas passadas entram na timeline pra permitir CRUD
+          if (emitir) {
+            const saidasPagas = cpsPagos.filter(
+              (c) => (c.dataPagamento || c.dataVencimento) === d,
+            );
+            if (receitaDiaRows.length || saidasPagas.length) {
+              dias.push({
+                data: d,
+                entradas: receitaDiaRows.map((x) => ({
+                  id: x.id,
+                  tipo: "receita" as const,
+                  clienteNome: `Receita ${x.forma}`,
+                  descricao: x.observacao,
+                  valor: parseFloat(String(x.valor)),
+                  forma: x.forma,
+                  observacao: x.observacao,
+                })),
+                saidas: saidasPagas.map((x) => ({
+                  id: x.id,
+                  tipo: "pagar" as const,
+                  descricao: x.descricao,
+                  valor: parseFloat(String(x.valor)),
+                  categoria: x.categoria,
+                  dataVencimento: x.dataVencimento,
+                  status: x.status,
+                  recorrencia: x.recorrencia,
+                  observacoes: x.observacoes,
+                })),
+              });
+            }
           }
         } else {
           const abertasDia = recsAbertas.filter((x) => x.dataVencimento === d);

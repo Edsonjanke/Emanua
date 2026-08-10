@@ -5,6 +5,7 @@ import {
   inferFormaReceita,
   isReceitaOperacional,
   isTransferenciaInterna,
+  inferSaldoInicialPlanilha,
 } from "@shared/planilha-movimentacoes-import";
 
 describe("planilha-movimentacoes-import", () => {
@@ -54,7 +55,7 @@ describe("planilha-movimentacoes-import", () => {
         0,
         13.47,
         -13.47,
-        133.14,
+        269.67,
         null,
       ],
     ]);
@@ -63,9 +64,34 @@ describe("planilha-movimentacoes-import", () => {
     expect(r.rows[0].data).toBe("2026-06-03");
     expect(r.rows[0].tipo).toBe("Entrada");
     expect(r.rows[0].entrada).toBe(150);
+    expect(r.rows[0].saldoApos).toBe(283.14);
     expect(r.rows[1].tipo).toBe("Saida");
     expect(r.rows[1].saida).toBe(13.47);
     expect(r.resumo.receitaOperacional).toBe(1);
+  });
+
+  it("infere saldo inicial pelo Saldo após", () => {
+    const r = parsePlanilhaMovimentacoesRows([
+      header,
+      [
+        "01/06/2026",
+        "2026-06",
+        "Viacredi",
+        "x",
+        "Saída",
+        "Mercado",
+        "Alimentação/Mercado",
+        null,
+        0,
+        102.5,
+        -102.5,
+        123.41,
+        null,
+      ],
+    ]);
+    const s = inferSaldoInicialPlanilha(r.rows);
+    expect(s.valor).toBe(225.91); // 123.41 - (-102.5)
+    expect(s.data).toBe("2026-05-31");
   });
 
   it("mapeia categorias e forma", () => {

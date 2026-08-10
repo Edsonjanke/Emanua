@@ -20,6 +20,8 @@ export interface PlanilhaMovRow {
   entrada: number;
   saida: number;
   valorLiquido: number;
+  /** Saldo da conta após o lançamento (quando a planilha traz). */
+  saldoApos: number | null;
   observacao: string | null;
   /** Chave de dedup estável para reimport. */
   dedupKey: string;
@@ -51,10 +53,13 @@ function normHeader(s: unknown): string {
 function excelDateToIso(v: unknown): string | null {
   if (v == null || v === "") return null;
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    const y = v.getFullYear();
-    const m = String(v.getMonth() + 1).padStart(2, "0");
-    const d = String(v.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    // Sempre calendário de Brasília — evita dia errado no Railway (UTC).
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(v);
   }
   if (typeof v === "number" && Number.isFinite(v)) {
     // Excel serial (dias desde 1899-12-30)
@@ -151,6 +156,40 @@ export function isTransferenciaInterna(categoria: string | null): boolean {
   return c.includes("transferencia interna");
 }
 
+/**
+ * Infere saldo inicial consolidado a partir do 1º "Saldo após" de cada conta:
+ * abertura = saldoApos - valorLiquido.
+ */
+export function inferSaldoInicialPlanilha(rows: PlanilhaMovRow[]): {
+  data: string | null;
+  valor: number | null;
+  porConta: Record<string, number>;
+} {
+  const firstByConta = new Map<string, PlanilhaMovRow>();
+  for (const row of rows) {
+    if (row.saldoApos == null) continue;
+    const prev = firstByConta.get(row.conta);
+    if (!prev || row.data < prev.data) firstByConta.set(row.conta, row);
+  }
+  const porConta: Record<string, number> = {};
+  let total = 0;
+  let earliest: string | null = null;
+  for (const [conta, row] of firstByConta) {
+    const abertura = Math.round((row.saldoApos! - row.valorLiquido) * 100) / 100;
+    porConta[conta] = abertura;
+    total += abertura;
+    if (!earliest || row.data < earliest) earliest = row.data;
+  }
+  if (!earliest) return { data: null, valor: null, porConta };
+  const d = new Date(earliest + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return {
+    data: d.toISOString().slice(0, 10),
+    valor: Math.round(total * 100) / 100,
+    porConta,
+  };
+}
+
 export function parsePlanilhaMovimentacoesRows(matrix: unknown[][]): PlanilhaParseResult {
   const erros: string[] = [];
   const rows: PlanilhaMovRow[] = [];
@@ -175,6 +214,7 @@ export function parsePlanilhaMovimentacoesRows(matrix: unknown[][]): PlanilhaPar
   const iEnt = findCol(headers, "entrada");
   const iSai = findCol(headers, "saida");
   const iLiq = findCol(headers, "valor liquido", "liquido");
+  const iSaldo = findCol(headers, "saldo apos", "saldo após");
   const iObs = findCol(headers, "observacao", "observa");
 
   if (iData < 0 || iTipo < 0 || iDesc < 0) {
@@ -250,6 +290,10 @@ export function parsePlanilhaMovimentacoesRows(matrix: unknown[][]): PlanilhaPar
       entrada: ent,
       saida: sai,
       valorLiquido: iLiq >= 0 ? toNumber(raw[iLiq]) : tipo === "Entrada" ? ent : -sai,
+      saldoApos:
+        iSaldo >= 0 && raw[iSaldo] != null && String(raw[iSaldo]).trim() !== ""
+          ? toNumber(raw[iSaldo])
+          : null,
       observacao: iObs >= 0 && raw[iObs] != null ? String(raw[iObs]) : null,
       dedupKey: buildPlanilhaDedupKey({
         data,
