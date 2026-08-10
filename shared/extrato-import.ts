@@ -13,6 +13,12 @@ export interface ExtratoRow {
   tipo: "C" | "D";
   ocorrencia: number;
   dedupKey: string;
+  /** Metadados Gendo — sync com receitas/despesas no import. */
+  categoria?: string | null;
+  descricao?: string | null;
+  forma?: "dinheiro" | "pix" | "cartao";
+  syncReceita?: boolean;
+  syncDespesa?: boolean;
 }
 
 export interface ExtratoParseResult {
@@ -81,6 +87,24 @@ function isGendoTransacoesHeader(campos: string[]): boolean {
   return h.includes("data") && h.includes("categoria") && h.includes("realizado") && h.includes("valor");
 }
 
+function inferFormaGendo(descricao: string): "dinheiro" | "pix" | "cartao" {
+  const d = descricao
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (d.includes("pix")) return "pix";
+  if (d.includes("cartao") || d.includes("credito") || d.includes("debito")) return "cartao";
+  return "dinheiro";
+}
+
+function isReceitaGendo(categoria: string): boolean {
+  const c = categoria
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return c.includes("pagamento") || c.includes("receita") || c.includes("venda");
+}
+
 /**
  * CSV Gendo / agenda: Data;Vencimento;Comanda;Responsável;Categoria;Descrição;Realizado;Valor
  * Só Realizado=Sim entra no extrato. Valor negativo = débito.
@@ -120,7 +144,6 @@ export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
       continue;
     }
     if (realizado && realizado !== "sim") {
-      // se vier outro texto, só importa quando parecer pago
       if (!["s", "yes", "true", "1", "pago"].includes(realizado)) {
         ignoradasNaoRealizadas++;
         continue;
@@ -157,6 +180,11 @@ export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
       tipo,
       ocorrencia,
       dedupKey: buildDedupKey(data, historico, documento, valor, tipo, ocorrencia),
+      categoria: categoria || null,
+      descricao: descricao || null,
+      forma: tipo === "C" ? inferFormaGendo(descricao) : undefined,
+      syncReceita: tipo === "C" && isReceitaGendo(categoria),
+      syncDespesa: tipo === "D",
     });
   }
 

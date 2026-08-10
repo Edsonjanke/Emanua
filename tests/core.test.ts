@@ -49,10 +49,12 @@ describe("extrato-import", () => {
       tipo: "C",
       valor: 145,
       documento: "comanda:53",
+      syncReceita: true,
+      forma: "dinheiro",
     });
-    expect(r.rows[1].tipo).toBe("D");
-    expect(r.rows[1].valor).toBe(100);
+    expect(r.rows[1]).toMatchObject({ tipo: "D", valor: 100, syncDespesa: true });
     expect(r.rows[2].valor).toBe(4.88);
+    expect(r.rows[2].syncDespesa).toBe(true);
   });
 });
 

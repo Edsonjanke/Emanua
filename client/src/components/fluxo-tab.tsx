@@ -69,7 +69,12 @@ export default function FluxoTab() {
         ignoradasNaoRealizadas?: number;
       }>("/api/extrato/parse-csv", file);
       if (!parsed.header) throw new Error("CSV sem header de agência/conta (ou formato não reconhecido)");
-      const r = await api.post<{ inseridas: number; total: number }>("/api/extrato/import", {
+      const r = await api.post<{
+        inseridas: number;
+        total: number;
+        receitasInseridas?: number;
+        despesasInseridas?: number;
+      }>("/api/extrato/import", {
         agencia: parsed.header.agencia,
         conta: parsed.header.conta,
         nome:
@@ -77,6 +82,7 @@ export default function FluxoTab() {
             ? "Gendo — Transações"
             : `Conta ${parsed.header.agencia}/${parsed.header.conta}`,
         rows: parsed.rows,
+        formato: parsed.formato,
         saldoInicialData: saldoInicial.data || undefined,
         saldoInicialValor: saldoInicial.valor ? Number(saldoInicial.valor) : undefined,
         ativar: true,
@@ -84,12 +90,15 @@ export default function FluxoTab() {
       return { ...r, formato: parsed.formato, ignoradasNaoRealizadas: parsed.ignoradasNaoRealizadas ?? 0 };
     },
     onSuccess: (r: any) => {
+      const parts = [`Extrato +${r.inseridas}`];
+      if (r.receitasInseridas) parts.push(`receitas +${r.receitasInseridas}`);
+      if (r.despesasInseridas) parts.push(`despesas +${r.despesasInseridas}`);
       const extra =
         r.formato === "gendo-transacoes" && r.ignoradasNaoRealizadas
           ? ` · ${r.ignoradasNaoRealizadas} não realizadas ignoradas`
           : "";
-      toast.success(`Importadas ${r.inseridas} de ${r.total} linhas${extra}`);
-      qc.invalidateQueries({ queryKey: ["fluxo"] });
+      toast.success(`${parts.join(" · ")}${extra}`);
+      refresh();
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -167,15 +176,20 @@ export default function FluxoTab() {
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center">
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={importMut.isPending}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
-        >
-          {importMut.isPending ? "Importando CSV…" : "Importar CSV"}
-        </button>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={importMut.isPending}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {importMut.isPending ? "Importando CSV…" : "Importar CSV"}
+          </button>
+          <span className="text-[10px] text-[var(--text-muted)] leading-tight px-0.5">
+            Gendo <em>transacoes.csv</em> ou extrato banco
+          </span>
+        </div>
         <button
           type="button"
           onClick={() => setPlanilhaOpen(true)}
@@ -194,9 +208,6 @@ export default function FluxoTab() {
             e.target.value = "";
           }}
         />
-        <span className="text-[10px] text-[var(--text-muted)] max-w-[10rem] leading-tight">
-          Gendo <em>transacoes.csv</em> ou extrato banco
-        </span>
         <button
           type="button"
           onClick={() => setModal({ tipo: "receita" })}

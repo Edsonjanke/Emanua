@@ -104,7 +104,8 @@ export async function registerRoutes(app: Express) {
 
   app.post("/api/extrato/import", authorize("admin", "gestor"), async (req, res) => {
     try {
-      const { agencia, conta, nome, rows, saldoInicialData, saldoInicialValor, ativar } = req.body ?? {};
+      const { agencia, conta, nome, rows, saldoInicialData, saldoInicialValor, ativar, formato } =
+        req.body ?? {};
       if (!agencia || !conta || !Array.isArray(rows)) {
         return res.status(400).json({ message: "agencia, conta e rows obrigatórios" });
       }
@@ -177,7 +178,109 @@ export async function registerRoutes(app: Express) {
           }
         }
       }
-      res.json({ contaId: bc.id, inseridas, total: rows.length });
+
+      // Gendo: também alimenta receitas do dia e contas pagas (timeline + faturamento).
+      let receitasInseridas = 0;
+      let despesasInseridas = 0;
+      if (formato === "gendo-transacoes" || rows.some((r: any) => r.syncReceita || r.syncDespesa)) {
+        const existingRec = await db
+          .select({ importDedupKey: receitasDia.importDedupKey })
+          .from(receitasDia);
+        const existingCp = await db
+          .select({ importDedupKey: contasPagar.importDedupKey })
+          .from(contasPagar);
+        const recKeys = new Set(existingRec.map((x) => x.importDedupKey).filter(Boolean));
+        const cpKeys = new Set(existingCp.map((x) => x.importDedupKey).filter(Boolean));
+
+        const receitaValues: {
+          data: string;
+          valor: string;
+          forma: "dinheiro" | "pix" | "cartao";
+          observacao: string | null;
+          importDedupKey: string;
+        }[] = [];
+        const despesaValues: {
+          descricao: string;
+          valor: string;
+          dataVencimento: string;
+          dataPagamento: string;
+          status: "pago";
+          categoria: string;
+          observacoes: string;
+          importDedupKey: string;
+        }[] = [];
+
+        for (const r of rows as any[]) {
+          const key = `gendo:${r.dedupKey}`;
+          if (r.syncReceita && r.tipo === "C") {
+            if (recKeys.has(key)) continue;
+            receitaValues.push({
+              data: r.data,
+              valor: String(r.valor),
+              forma: r.forma || "dinheiro",
+              observacao: [r.descricao || r.historico, r.documento].filter(Boolean).join(" · ").slice(0, 500),
+              importDedupKey: key,
+            });
+            recKeys.add(key);
+          }
+          if (r.syncDespesa && r.tipo === "D") {
+            if (cpKeys.has(key)) continue;
+            const desc = String(r.descricao || r.historico || "Despesa").slice(0, 200);
+            despesaValues.push({
+              descricao: desc,
+              valor: String(r.valor),
+              dataVencimento: r.data,
+              dataPagamento: r.data,
+              status: "pago",
+              categoria: mapCategoriaPagar(r.categoria ?? null),
+              observacoes: [r.categoria, r.documento].filter(Boolean).join(" · ").slice(0, 500),
+              importDedupKey: key,
+            });
+            cpKeys.add(key);
+          }
+        }
+
+        for (let i = 0; i < receitaValues.length; i += BATCH) {
+          const chunk = receitaValues.slice(i, i + BATCH);
+          try {
+            const ins = await db.insert(receitasDia).values(chunk).returning({ id: receitasDia.id });
+            receitasInseridas += ins.length;
+          } catch {
+            for (const row of chunk) {
+              try {
+                await db.insert(receitasDia).values(row);
+                receitasInseridas++;
+              } catch {
+                /* dup */
+              }
+            }
+          }
+        }
+        for (let i = 0; i < despesaValues.length; i += BATCH) {
+          const chunk = despesaValues.slice(i, i + BATCH);
+          try {
+            const ins = await db.insert(contasPagar).values(chunk).returning({ id: contasPagar.id });
+            despesasInseridas += ins.length;
+          } catch {
+            for (const row of chunk) {
+              try {
+                await db.insert(contasPagar).values(row);
+                despesasInseridas++;
+              } catch {
+                /* dup */
+              }
+            }
+          }
+        }
+      }
+
+      res.json({
+        contaId: bc.id,
+        inseridas,
+        total: rows.length,
+        receitasInseridas,
+        despesasInseridas,
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
