@@ -906,7 +906,7 @@ export async function registerRoutes(app: Express) {
       });
       const pe = calcPontoEquilibrio(totalFixos, Number(meta?.margemContribuicaoPct ?? 60));
 
-      dias.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+      dias.sort((a, b) => (a.data > b.data ? -1 : a.data < b.data ? 1 : 0));
 
       res.json({
         hoje,
