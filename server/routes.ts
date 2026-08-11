@@ -17,6 +17,7 @@ import {
   CATEGORIAS_PAGAR,
 } from "@shared/schema";
 import { parseExtratoCsv } from "@shared/extrato-import";
+import { parseGendoContasPagarCsv } from "@shared/contas-pagar-import";
 import { sugerirConciliacao } from "@shared/extrato-conciliacao";
 import { resolveDebitoNatureza } from "@shared/prolabore";
 import {
@@ -1144,6 +1145,80 @@ export async function registerRoutes(app: Express) {
       })
       .returning();
     res.status(201).json(row);
+  });
+
+  app.post(
+    "/api/contas-pagar/parse-csv",
+    authorize("admin", "gestor"),
+    extratoUpload.single("file"),
+    async (req: any, res) => {
+      try {
+        const texto = req.file?.buffer?.toString("utf-8") ?? "";
+        const parsed = parseGendoContasPagarCsv(texto, hojeBrasil());
+        res.json(parsed);
+      } catch (e: any) {
+        res.status(400).json({ message: e.message || "Falha ao parsear CSV" });
+      }
+    },
+  );
+
+  app.post("/api/contas-pagar/import-csv", authorize("admin", "gestor"), async (req, res) => {
+    try {
+      const rows = (req.body?.rows ?? []) as {
+        descricao: string;
+        valor: number;
+        dataVencimento: string;
+        categoria: string;
+        status: "pendente" | "pago" | "vencido";
+        dataPagamento: string | null;
+        observacoes: string | null;
+        importDedupKey: string;
+      }[];
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "rows obrigatório" });
+      }
+
+      const existing = await db
+        .select({ importDedupKey: contasPagar.importDedupKey })
+        .from(contasPagar);
+      const keys = new Set(existing.map((x) => x.importDedupKey).filter(Boolean));
+
+      const toInsert = rows.filter((r) => r.importDedupKey && !keys.has(r.importDedupKey));
+      const duplicadas = rows.length - toInsert.length;
+
+      const BATCH = 100;
+      let inseridas = 0;
+      for (let i = 0; i < toInsert.length; i += BATCH) {
+        const chunk = toInsert.slice(i, i + BATCH).map((r) => ({
+          descricao: r.descricao,
+          valor: String(r.valor),
+          dataVencimento: r.dataVencimento,
+          dataPagamento: r.dataPagamento,
+          status: r.status,
+          categoria: r.categoria,
+          observacoes: r.observacoes,
+          importDedupKey: r.importDedupKey,
+        }));
+        try {
+          const ins = await db.insert(contasPagar).values(chunk).returning({ id: contasPagar.id });
+          inseridas += ins.length;
+        } catch {
+          for (const row of chunk) {
+            try {
+              await db.insert(contasPagar).values(row);
+              inseridas++;
+            } catch {
+              /* dup */
+            }
+          }
+        }
+      }
+
+      res.json({ inseridas, duplicadas, total: rows.length });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ message: e.message });
+    }
   });
 
   app.patch("/api/contas-pagar/:id", authorize("admin", "gestor"), async (req, res) => {

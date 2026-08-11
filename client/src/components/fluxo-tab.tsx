@@ -46,6 +46,7 @@ export default function FluxoTab() {
   const { format } = useMoney();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const contasFileRef = useRef<HTMLInputElement>(null);
   const [incluirDas, setIncluirDas] = useState(false);
   const [incluirProLabore, setIncluirProLabore] = useState(true);
   const [modal, setModal] = useState<LancamentoEdit | null>(null);
@@ -99,6 +100,31 @@ export default function FluxoTab() {
           ? ` · ${r.ignoradasNaoRealizadas} não realizadas ignoradas`
           : "";
       toast.success(`${parts.join(" · ")}${extra}`);
+      refresh();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const importContasMut = useMutation({
+    mutationFn: async (file: File) => {
+      const parsed = await api.upload<{
+        rows: any[];
+        erros: string[];
+        resumo: { total: number; pagas: number; pendentes: number; vencidas: number };
+      }>("/api/contas-pagar/parse-csv", file);
+      if (!parsed.rows?.length) throw new Error(parsed.erros?.[0] || "Nenhuma conta a pagar no CSV");
+      const r = await api.post<{ inseridas: number; duplicadas: number; total: number }>(
+        "/api/contas-pagar/import-csv",
+        { rows: parsed.rows },
+      );
+      return { ...r, resumo: parsed.resumo };
+    },
+    onSuccess: (r: any) => {
+      toast.success(
+        `Contas a pagar +${r.inseridas}` +
+          (r.duplicadas ? ` · ${r.duplicadas} já existiam` : "") +
+          (r.resumo ? ` (${r.resumo.pendentes} pend. · ${r.resumo.pagas} pagas)` : ""),
+      );
       refresh();
     },
     onError: (e: any) => toast.error(e.message),
@@ -221,6 +247,25 @@ export default function FluxoTab() {
           </button>
           <button
             type="button"
+            onClick={() => contasFileRef.current?.click()}
+            disabled={importContasMut.isPending}
+            className="rounded-lg border border-[var(--red)]/40 text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
+          >
+            {importContasMut.isPending ? "Importando…" : "Importar a pagar"}
+          </button>
+          <input
+            ref={contasFileRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importContasMut.mutate(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
             onClick={() => setModal({ tipo: "receber" })}
             className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
           >
@@ -263,7 +308,7 @@ export default function FluxoTab() {
           </div>
         </div>
         <p className="text-[10px] text-[var(--text-muted)] leading-tight">
-          Importar CSV: Gendo <em>transacoes.csv</em> ou extrato banco
+          Importar CSV: Gendo <em>transacoes.csv</em> · Importar a pagar: <em>transacoes_contas.csv</em>
         </p>
       </div>
 
