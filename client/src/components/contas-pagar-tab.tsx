@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -21,9 +21,12 @@ const CATEGORIAS_PAGAR = [
   "Outros",
 ] as const;
 
+type FiltroAba = "aberto" | "pagas";
+
 export default function ContasPagarTab() {
   const { format } = useMoney();
   const qc = useQueryClient();
+  const [aba, setAba] = useState<FiltroAba>("aberto");
   const q = useQuery({
     queryKey: ["contas-pagar"],
     queryFn: () => api.get<any[]>("/api/contas-pagar"),
@@ -35,6 +38,14 @@ export default function ContasPagarTab() {
     categoria: "Outros",
     recorrencia: "" as "" | "mensal",
   });
+
+  const rows = q.data ?? [];
+  const abertas = useMemo(
+    () => rows.filter((r) => r.status === "pendente" || r.status === "vencido"),
+    [rows],
+  );
+  const pagas = useMemo(() => rows.filter((r) => r.status === "pago"), [rows]);
+  const lista = aba === "aberto" ? abertas : pagas;
 
   const create = useMutation({
     mutationFn: () =>
@@ -54,11 +65,17 @@ export default function ContasPagarTab() {
         categoria: "Outros",
         recorrencia: "",
       });
+      setAba("aberto");
       qc.invalidateQueries({ queryKey: ["contas-pagar"] });
       qc.invalidateQueries({ queryKey: ["fluxo"] });
     },
     onError: (e: any) => toast.error(e.message),
   });
+
+  function refresh() {
+    qc.invalidateQueries({ queryKey: ["contas-pagar"] });
+    qc.invalidateQueries({ queryKey: ["fluxo"] });
+  }
 
   return (
     <div className="space-y-4">
@@ -128,6 +145,33 @@ export default function ContasPagarTab() {
         </button>
       </form>
 
+      <div className="flex gap-1 border-b border-[var(--border)]">
+        <button
+          type="button"
+          onClick={() => setAba("aberto")}
+          className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+            aba === "aberto"
+              ? "border-[var(--accent)] text-white"
+              : "border-transparent text-[var(--text-muted)] hover:text-white"
+          }`}
+        >
+          Em aberto
+          <span className="ml-1.5 text-xs text-[var(--text-muted)]">({abertas.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setAba("pagas")}
+          className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+            aba === "pagas"
+              ? "border-[var(--accent)] text-white"
+              : "border-transparent text-[var(--text-muted)] hover:text-white"
+          }`}
+        >
+          Pagas
+          <span className="ml-1.5 text-xs text-[var(--text-muted)]">({pagas.length})</span>
+        </button>
+      </div>
+
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-[var(--text-muted)] text-left">
@@ -135,13 +179,24 @@ export default function ContasPagarTab() {
               <th className="p-3">Descrição</th>
               <th>Categoria</th>
               <th>Vencimento</th>
+              {aba === "pagas" && <th>Pagamento</th>}
               <th>Valor</th>
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {(q.data ?? []).map((r) => (
+            {lista.length === 0 && (
+              <tr>
+                <td
+                  colSpan={aba === "pagas" ? 7 : 6}
+                  className="p-6 text-center text-[var(--text-muted)]"
+                >
+                  {aba === "aberto" ? "Nenhuma conta em aberto." : "Nenhuma conta paga."}
+                </td>
+              </tr>
+            )}
+            {lista.map((r) => (
               <tr key={r.id} className="border-t border-[var(--border)]">
                 <td className="p-3">
                   {r.descricao}
@@ -151,18 +206,38 @@ export default function ContasPagarTab() {
                 </td>
                 <td>{r.categoria}</td>
                 <td>{formatDateBR(r.dataVencimento)}</td>
+                {aba === "pagas" && (
+                  <td>{r.dataPagamento ? formatDateBR(r.dataPagamento) : "—"}</td>
+                )}
                 <td className="text-[var(--red)]">{format(Number(r.valor))}</td>
-                <td>{r.status}</td>
+                <td>
+                  <span
+                    className={
+                      r.status === "vencido"
+                        ? "text-[var(--red)]"
+                        : r.status === "pago"
+                          ? "text-[var(--green)]"
+                          : ""
+                    }
+                  >
+                    {r.status}
+                  </span>
+                </td>
                 <td className="p-3 space-x-2">
                   {(r.status === "pendente" || r.status === "vencido") && (
                     <button
                       type="button"
                       className="text-xs text-[var(--accent)]"
                       onClick={() =>
-                        api.patch(`/api/contas-pagar/${r.id}`, { status: "pago" }).then(() => {
-                          qc.invalidateQueries({ queryKey: ["contas-pagar"] });
-                          qc.invalidateQueries({ queryKey: ["fluxo"] });
-                        })
+                        api
+                          .patch(`/api/contas-pagar/${r.id}`, {
+                            status: "pago",
+                            dataPagamento: hojeBrasil(),
+                          })
+                          .then(() => {
+                            toast.success("Marcada como paga");
+                            refresh();
+                          })
                       }
                     >
                       Pagar
@@ -173,8 +248,7 @@ export default function ContasPagarTab() {
                     className="text-xs text-[var(--red)]"
                     onClick={() =>
                       api.delete(`/api/contas-pagar/${r.id}`).then(() => {
-                        qc.invalidateQueries({ queryKey: ["contas-pagar"] });
-                        qc.invalidateQueries({ queryKey: ["fluxo"] });
+                        refresh();
                       })
                     }
                   >
