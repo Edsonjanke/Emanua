@@ -323,7 +323,9 @@ export default function ContasPagarTab() {
                 {aba === "pagas" && (
                   <td>{r.dataPagamento ? formatDateBR(r.dataPagamento) : "—"}</td>
                 )}
-                <td className="text-[var(--red)]">{format(Number(r.valor))}</td>
+                <td className={r.status === "pago" ? "text-[var(--green)]" : "text-[var(--red)]"}>
+                  {format(Number(r.valor))}
+                </td>
                 <td>
                   <span
                     className={
