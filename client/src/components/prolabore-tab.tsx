@@ -38,16 +38,19 @@ export default function ProLaboreTab() {
         {Object.entries(data.porSocio as Record<string, number>).map(([socio, total]) => (
           <div key={socio} className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
             <p className="text-xs uppercase text-[var(--text-muted)]">{socio}</p>
-            <p className="text-xl text-white">{format(total)}</p>
+            <p className="text-xl text-[var(--text)]">{format(total)}</p>
           </div>
         ))}
         {Object.keys(data.porSocio).length === 0 && (
-          <p className="text-sm text-[var(--text-muted)]">Nenhum pró-labore classificado no período.</p>
+          <p className="text-sm text-[var(--text-muted)]">
+            Nenhum pró-labore classificado neste período. Use as regras abaixo ou marque linhas na
+            tabela.
+          </p>
         )}
       </div>
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
-        <h2 className="text-sm uppercase tracking-wide text-[var(--text-muted)] mb-3">Regras</h2>
+        <h2 className="text-sm font-medium text-[var(--text)] mb-3">Regras de classificação</h2>
         <ul className="text-sm space-y-1 mb-4">
           {(data.regras ?? []).map((r: any) => (
             <li key={r.id} className="flex justify-between gap-2 border-b border-[var(--border)] py-1">
@@ -91,7 +94,7 @@ export default function ProLaboreTab() {
           <button
             type="button"
             onClick={() => addRegra.mutate()}
-            className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-white"
+            className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--on-accent)]"
           >
             Adicionar regra
           </button>
@@ -116,34 +119,44 @@ export default function ProLaboreTab() {
                 <td className="p-3">{formatDateBR(i.data)}</td>
                 <td className="max-w-xs truncate">{i.historico}</td>
                 <td>{format(i.valor)}</td>
-                <td>{i.natureza}</td>
+                <td>
+                  {i.natureza === "pro_labore"
+                    ? "Pró-labore"
+                    : i.natureza === "empresa"
+                      ? "Empresa"
+                      : i.natureza === "pendente"
+                        ? "Sem classificar"
+                        : i.natureza}
+                </td>
                 <td>{i.socio ?? "—"}</td>
                 <td className="p-3 space-x-1">
                   <button
                     type="button"
                     className="text-xs text-[var(--accent)]"
                     onClick={() => {
-                      const socio = prompt("Marcar como pró-labore do sócio:", i.socio || "ataize");
+                      const socio = prompt("Pró-labore de qual sócio?", i.socio || "ataize");
                       if (!socio) return;
                       api.patch(`/api/extrato/${i.id}/prolabore`, { override: socio }).then(() => {
+                        toast.success(`Classificado como pró-labore de ${socio}`);
                         qc.invalidateQueries({ queryKey: ["pro-labore"] });
                         qc.invalidateQueries({ queryKey: ["fluxo"] });
                       });
                     }}
                   >
-                    Sócio
+                    É pró-labore
                   </button>
                   <button
                     type="button"
                     className="text-xs text-[var(--text-muted)]"
                     onClick={() =>
                       api.patch(`/api/extrato/${i.id}/prolabore`, { override: "excluir" }).then(() => {
+                        toast.success("Marcado como despesa da empresa");
                         qc.invalidateQueries({ queryKey: ["pro-labore"] });
                         qc.invalidateQueries({ queryKey: ["fluxo"] });
                       })
                     }
                   >
-                    Empresa
+                    É da empresa
                   </button>
                 </td>
               </tr>

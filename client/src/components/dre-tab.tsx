@@ -21,7 +21,7 @@ export default function DreTab() {
         { label: "Margem de contribuição", value: q.data.margemContribuicao, bold: true },
         { label: "(−) Custos fixos", value: -q.data.custosFixos, tone: "red" },
         { label: "(−) Pró-labore", value: -q.data.proLabore, tone: "red" },
-        { label: "(−) DAS", value: -q.data.das, tone: "red" },
+        { label: "(−) DAS (Simples Nacional)", value: -q.data.das, tone: "red" },
         { label: "Resultado operacional", value: q.data.resultadoOperacional, bold: true },
       ]
     : [];
@@ -72,7 +72,7 @@ export default function DreTab() {
                     ? "text-[var(--green)]"
                     : r.tone === "red"
                       ? "text-[var(--red)]"
-                      : "text-white"
+                      : "text-[var(--text)]"
                 }
               >
                 {format(Math.abs(r.value))}

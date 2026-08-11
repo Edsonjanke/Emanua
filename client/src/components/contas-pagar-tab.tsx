@@ -99,6 +99,7 @@ export default function ContasPagarTab() {
   });
 
   async function pagar(r: any) {
+    if (!confirm(`Marcar “${r.descricao}” como paga? Ela sai de Em aberto.`)) return;
     try {
       await api.patch(`/api/contas-pagar/${r.id}`, {
         status: "pago",
@@ -106,7 +107,7 @@ export default function ContasPagarTab() {
       });
       toast.success(
         r.recorrencia === "mensal"
-          ? "Paga — próxima parcela mensal criada"
+          ? "Marcada como paga — próxima parcela do mês seguinte criada"
           : "Marcada como paga",
       );
       refresh();
@@ -118,7 +119,7 @@ export default function ContasPagarTab() {
   async function tornarMensal(r: any) {
     try {
       await api.patch(`/api/contas-pagar/${r.id}`, { recorrencia: "mensal" });
-      toast.success("Agora é mensal (gera próxima ao pagar)");
+      toast.success("Agora repete todo mês (cria a próxima parcela ao marcar como paga)");
       refresh();
     } catch (e: any) {
       toast.error(e.message);
@@ -128,7 +129,7 @@ export default function ContasPagarTab() {
   async function removerMensal(r: any) {
     try {
       await api.patch(`/api/contas-pagar/${r.id}`, { recorrencia: null });
-      toast.success("Recorrência removida");
+      toast.success("Repetição mensal desligada");
       refresh();
     } catch (e: any) {
       toast.error(e.message);
@@ -136,7 +137,7 @@ export default function ContasPagarTab() {
   }
 
   async function excluir(r: any) {
-    if (!confirm(`Excluir “${r.descricao}”?`)) return;
+    if (!confirm(`Excluir “${r.descricao}”? Esta ação não pode ser desfeita.`)) return;
     try {
       await api.delete(`/api/contas-pagar/${r.id}`);
       toast.success("Excluída");
@@ -157,13 +158,13 @@ export default function ContasPagarTab() {
         }}
       >
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm text-white">
+          <h3 className="text-sm text-[var(--text)]">
             {editingId ? "Editar conta a pagar" : "Nova conta a pagar"}
           </h3>
           {editingId && (
             <button
               type="button"
-              className="text-xs text-[var(--text-muted)] hover:text-white"
+              className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
               onClick={resetForm}
             >
               Cancelar edição
@@ -223,20 +224,20 @@ export default function ContasPagarTab() {
               value={form.recorrencia}
               onChange={(e) => setForm({ ...form, recorrencia: e.target.value as "" | "mensal" })}
             >
-              <option value="">Única</option>
-              <option value="mensal">Mensal</option>
+              <option value="">Única vez</option>
+              <option value="mensal">Todo mês</option>
             </select>
           </div>
           <button
             type="submit"
             disabled={save.isPending}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-50"
           >
             {save.isPending ? "Salvando…" : editingId ? "Salvar" : "Adicionar"}
           </button>
         </div>
         {form.recorrencia === "mensal" && (
-          <p className="text-[11px] text-[var(--text-muted)]">
+          <p className="text-xs text-[var(--text-muted)]">
             Mensal: ao marcar como paga, o sistema cria automaticamente a próxima parcela no mês
             seguinte (ex.: aluguel).
           </p>
@@ -258,8 +259,8 @@ export default function ContasPagarTab() {
           onClick={() => setAba("aberto")}
           className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
             aba === "aberto"
-              ? "border-[var(--accent)] text-white"
-              : "border-transparent text-[var(--text-muted)] hover:text-white"
+              ? "border-[var(--accent)] text-[var(--text)]"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
           }`}
         >
           Em aberto
@@ -270,8 +271,8 @@ export default function ContasPagarTab() {
           onClick={() => setAba("pagas")}
           className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
             aba === "pagas"
-              ? "border-[var(--accent)] text-white"
-              : "border-transparent text-[var(--text-muted)] hover:text-white"
+              ? "border-[var(--accent)] text-[var(--text)]"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
           }`}
         >
           Pagas
@@ -299,7 +300,9 @@ export default function ContasPagarTab() {
                   colSpan={aba === "pagas" ? 7 : 6}
                   className="p-6 text-center text-[var(--text-muted)]"
                 >
-                  {aba === "aberto" ? "Nenhuma conta em aberto." : "Nenhuma conta paga."}
+                  {aba === "aberto"
+                    ? "Nenhuma conta em aberto. Cadastre uma acima ou importe o CSV do Gendo."
+                    : "Nenhuma conta marcada como paga ainda."}
                 </td>
               </tr>
             )}
@@ -313,7 +316,7 @@ export default function ContasPagarTab() {
                 <td className="p-3">
                   {r.descricao}
                   {r.recorrencia === "mensal" && (
-                    <span className="ml-2 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
+                    <span className="ml-2 text-xs uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
                       mensal
                     </span>
                   )}
@@ -336,15 +339,22 @@ export default function ContasPagarTab() {
                           : ""
                     }
                   >
-                    {r.status}
+                    {r.status === "pendente"
+                      ? "Em aberto"
+                      : r.status === "vencido"
+                        ? "Vencida"
+                        : r.status === "pago"
+                          ? "Paga"
+                          : r.status}
                   </span>
                 </td>
                 <td className="p-3">
                   <div className="flex flex-wrap gap-2 justify-end items-center">
                     <button
                       type="button"
-                      className="p-1 rounded hover:bg-[var(--bg)] text-[var(--text-muted)] hover:text-white"
+                      className="p-1 rounded hover:bg-[var(--bg)] text-[var(--text-muted)] hover:text-[var(--text)]"
                       title="Editar"
+                      aria-label="Editar"
                       onClick={() => startEdit(r)}
                     >
                       <Pencil size={14} />
@@ -356,24 +366,25 @@ export default function ContasPagarTab() {
                           className="text-xs text-[var(--accent)]"
                           onClick={() => pagar(r)}
                         >
-                          Pagar
+                          Marcar como paga
                         </button>
                         {r.recorrencia !== "mensal" ? (
                           <button
                             type="button"
-                            className="text-xs text-[var(--text-muted)] hover:text-white"
-                            title="Repete todo mês ao pagar"
+                            className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+                            title="Ao marcar como paga, cria a próxima parcela no mês seguinte"
                             onClick={() => tornarMensal(r)}
                           >
-                            Tornar mensal
+                            Repetir todo mês
                           </button>
                         ) : (
                           <button
                             type="button"
-                            className="text-xs text-[var(--text-muted)] hover:text-white"
+                            className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+                            title="Não gera mais parcelas automaticamente"
                             onClick={() => removerMensal(r)}
                           >
-                            Só única
+                            Parar repetição
                           </button>
                         )}
                       </>
@@ -382,6 +393,7 @@ export default function ContasPagarTab() {
                       type="button"
                       className="p-1 rounded hover:bg-[var(--bg)] text-[var(--red)]"
                       title="Excluir"
+                      aria-label="Excluir"
                       onClick={() => excluir(r)}
                     >
                       <Trash2 size={14} />

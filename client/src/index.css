@@ -1,16 +1,25 @@
 @import "tailwindcss";
 
+/*
+  Emanua Massoterapia — light mint/sage operate shell
+  (palette: mint → seafoam → grass → emerald).
+*/
 :root {
-  --bg: #0d1117;
-  --bg-elevated: #161b22;
-  --bg-card: #1c2128;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --accent: #2f81f7;
-  --green: #3fb950;
-  --red: #f85149;
-  --gold: #d4a017;
+  --bg: #ebf5e9;
+  --bg-elevated: #f7faf4;
+  --bg-card: #ffffff;
+  --border: #bed3b2;
+  --text: #172416;
+  --text-muted: #516335;
+  --accent: #559265;
+  --accent-strong: #3d5f3b;
+  --green: #3d5f3b;
+  --red: #c45c52;
+  --brand: #85ad61;
+  --sage: #d4e3c4;
+  --pine: #78a45a;
+  --focus-ring: #559265;
+  --on-accent: #ebf5e9;
 }
 
 * {
@@ -32,7 +41,6 @@ body {
 }
 
 h1,
-h2,
 .brand {
   font-family: "Instrument Serif", Georgia, serif;
   font-weight: 400;
@@ -45,11 +53,32 @@ textarea {
   font: inherit;
 }
 
+button {
+  transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out,
+    opacity 160ms ease-out;
+}
+
+input,
+select,
+textarea {
+  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #30363d;
+  background: var(--border);
   border-radius: 4px;
 }

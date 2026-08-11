@@ -24,7 +24,7 @@ export default function LoginPage() {
       toast.success("Bem-vinda");
       setLoc("/");
     } catch (err: any) {
-      toast.error(err.message || "Falha no login");
+      toast.error(err.message || "Não foi possível entrar. Confira usuário e senha.");
     } finally {
       setBusy(false);
     }
@@ -36,18 +36,18 @@ export default function LoginPage() {
         className="absolute inset-0 opacity-40"
         style={{
           background:
-            "radial-gradient(ellipse 80% 50% at 50% -20%, #1f4e79 0%, transparent 55%), radial-gradient(ellipse 60% 40% at 100% 100%, #1a3a2a 0%, transparent 50%)",
+            "radial-gradient(ellipse 80% 50% at 50% -20%, #d4e3c4 0%, transparent 55%), radial-gradient(ellipse 60% 40% at 100% 100%, #bed3b2 0%, transparent 50%)",
         }}
       />
       <form
         onSubmit={onSubmit}
-        className="relative w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)]/90 p-8 shadow-2xl backdrop-blur"
+        className="relative w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)]/95 p-8 shadow-[0_12px_40px_rgba(23,36,22,0.12)] backdrop-blur"
       >
-        <p className="brand text-3xl text-white mb-1">Emanua</p>
+        <p className="brand text-3xl text-[var(--text)] mb-1">Emanua</p>
         <p className="text-sm text-[var(--text-muted)] mb-6">Controle financeiro · massoterapia</p>
         <label className="block text-xs text-[var(--text-muted)] mb-1">Usuário</label>
         <input
-          className="w-full mb-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 outline-none focus:border-[var(--accent)]"
+          className="w-full mb-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 focus:border-[var(--accent-strong)]"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
@@ -56,7 +56,7 @@ export default function LoginPage() {
         <label className="block text-xs text-[var(--text-muted)] mb-1">Senha</label>
         <input
           type="password"
-          className="w-full mb-5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 outline-none focus:border-[var(--accent)]"
+          className="w-full mb-5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 focus:border-[var(--accent-strong)]"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
@@ -65,7 +65,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-lg bg-[var(--accent)] py-2.5 font-medium text-white hover:brightness-110 disabled:opacity-50"
+          className="w-full rounded-lg bg-[var(--accent)] py-2.5 font-medium text-[var(--on-accent)] hover:bg-[var(--accent-strong)] disabled:opacity-50"
         >
           {busy ? "Entrando…" : "Entrar"}
         </button>

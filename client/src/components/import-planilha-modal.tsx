@@ -81,13 +81,13 @@ export default function ImportPlanilhaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--text)]/45 backdrop-blur-[2px] p-4" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5 space-y-4"
       >
         <div>
-          <h3 className="text-lg text-white">Importar planilha de entradas/saídas</h3>
+          <h3 className="text-lg text-[var(--text)]">Importar planilha de entradas/saídas</h3>
           <p className="text-sm text-[var(--text-muted)] mt-1">
             Formato XLSX com aba <em>Movimentações</em> (Data, Conta, Tipo, Descrição, Categoria,
             Entrada/Saída…). Ex.: planilha jun–ago 2026.
@@ -109,7 +109,7 @@ export default function ImportPlanilhaModal({
           type="button"
           disabled={busy}
           onClick={() => fileRef.current?.click()}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
+          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-50"
         >
           {busy && !parsed ? "Lendo…" : "Escolher arquivo .xlsx"}
         </button>
@@ -220,7 +220,7 @@ export default function ImportPlanilhaModal({
             type="button"
             disabled={busy || !parsed?.rows?.length}
             onClick={importar}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-50"
           >
             {busy ? "Importando… aguarde" : "Importar"}
           </button>
@@ -232,10 +232,10 @@ export default function ImportPlanilhaModal({
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   const color =
-    tone === "green" ? "text-[var(--green)]" : tone === "red" ? "text-[var(--red)]" : "text-white";
+    tone === "green" ? "text-[var(--green)]" : tone === "red" ? "text-[var(--red)]" : "text-[var(--text)]";
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3">
-      <p className="text-[10px] uppercase text-[var(--text-muted)]">{label}</p>
+      <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
       <p className={`text-lg ${color}`}>{value}</p>
     </div>
   );

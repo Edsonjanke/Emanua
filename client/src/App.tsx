@@ -16,8 +16,19 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
-      <div className="min-h-screen grid place-items-center text-[var(--text-muted)]">
-        Carregando…
+      <div className="min-h-screen grid place-items-center relative overflow-hidden">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-40"
+          aria-hidden
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 50% at 50% -20%, #d4e3c4 0%, transparent 55%), radial-gradient(ellipse 60% 40% at 100% 100%, #bed3b2 0%, transparent 50%)",
+          }}
+        />
+        <div className="relative text-center">
+          <p className="brand text-3xl text-[var(--text)]">Emanua</p>
+          <p className="text-sm text-[var(--text-muted)] mt-2">Carregando o painel…</p>
+        </div>
       </div>
     );
   }
@@ -41,7 +52,7 @@ export default function App() {
               <Redirect to="/" />
             </Route>
           </Switch>
-          <Toaster theme="dark" position="top-right" richColors />
+          <Toaster theme="light" position="top-right" richColors />
         </MoneyProvider>
       </AuthProvider>
     </QueryClientProvider>

@@ -39,7 +39,7 @@ const CATEGORIAS = [
 const TITLES: Record<LancamentoTipo, string> = {
   receita: "Receita do dia",
   pagar: "Conta a pagar",
-  receber: "Conta a receber",
+  receber: "Valor a receber",
 };
 
 export default function FluxoLancamentoModal({
@@ -112,13 +112,13 @@ export default function FluxoLancamentoModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--text)]/45 backdrop-blur-[2px] p-4" onClick={onClose}>
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={save}
         className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5 space-y-3"
       >
-        <h3 className="text-lg text-white">
+        <h3 className="text-lg text-[var(--text)]">
           {editing ? "Editar" : "Nova"} {TITLES[tipo].toLowerCase()}
         </h3>
 
@@ -203,8 +203,8 @@ export default function FluxoLancamentoModal({
               value={recorrencia}
               onChange={(e) => setRecorrencia(e.target.value as any)}
             >
-              <option value="">Única</option>
-              <option value="mensal">Mensal</option>
+              <option value="">Única vez</option>
+              <option value="mensal">Todo mês</option>
             </select>
           </>
         )}
@@ -214,7 +214,7 @@ export default function FluxoLancamentoModal({
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
           value={observacao}
           onChange={(e) => setObservacao(e.target.value)}
-          placeholder="opcional"
+          placeholder="Opcional"
         />
 
         <div className="flex justify-end gap-2 pt-2">
@@ -224,7 +224,7 @@ export default function FluxoLancamentoModal({
           <button
             type="submit"
             disabled={busy}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-50"
           >
             {busy ? "Salvando…" : "Salvar"}
           </button>

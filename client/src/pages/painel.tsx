@@ -36,13 +36,23 @@ export default function PainelPage() {
   const { hidden, toggle } = useMoney();
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-[var(--border)] bg-[var(--bg-elevated)]/80 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-start justify-between gap-4">
+    <div className="min-h-screen flex flex-col relative">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        aria-hidden
+        style={{
+          background:
+            "radial-gradient(ellipse 80% 50% at 50% -20%, #d4e3c4 0%, transparent 55%), radial-gradient(ellipse 60% 40% at 100% 100%, #bed3b2 0%, transparent 50%)",
+        }}
+      />
+      <header className="relative border-b border-[var(--border)] bg-[var(--bg-elevated)]/95 backdrop-blur sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl text-white leading-none">Painel Financeiro</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-1">
-              Emanua Massoterapia · visão geral e controle
+            <h1 className="brand text-2xl md:text-3xl text-[var(--text)] leading-none tracking-tight">
+              Emanua
+            </h1>
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              Massoterapia · painel financeiro
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -52,6 +62,7 @@ export default function PainelPage() {
               onClick={toggle}
               className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--bg-card)]"
               title={hidden ? "Mostrar valores" : "Ocultar valores"}
+              aria-label={hidden ? "Mostrar valores" : "Ocultar valores"}
             >
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
@@ -60,21 +71,25 @@ export default function PainelPage() {
               onClick={() => logout()}
               className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--bg-card)]"
               title="Sair"
+              aria-label="Sair"
             >
               <LogOut size={16} />
             </button>
           </div>
         </div>
-        <nav className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto pb-0">
+        <nav
+          className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto pb-0"
+          aria-label="Seções do painel"
+        >
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 tab === t.id
-                  ? "border-[var(--accent)] text-white"
-                  : "border-transparent text-[var(--text-muted)] hover:text-white"
+                  ? "border-[var(--brand)] text-[var(--text)]"
+                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
               }`}
             >
               {t.icon}
@@ -84,7 +99,7 @@ export default function PainelPage() {
         </nav>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-5">
+      <main className="relative flex-1 max-w-7xl w-full mx-auto px-4 py-4">
         {tab === "fluxo" && <FluxoTab />}
         {tab === "metas" && <MetasTab />}
         {tab === "dre" && <DreTab />}

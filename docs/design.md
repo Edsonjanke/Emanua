@@ -2,13 +2,15 @@
 
 App independente de controle financeiro para **Emanua Massoterapia**.
 
+> Visual system (tokens, type, components, named rules): see root [`DESIGN.md`](../DESIGN.md) and [`.impeccable/design.json`](../.impeccable/design.json). This file keeps product/model decisions only.
+
 ## Decisões
 
 - Stack: React 18 + Vite + Express + Drizzle + Postgres (Neon)
 - Abas: Fluxo · Metas · DRE · Contas a Receber · Contas a Pagar · Pró-labore/Pessoal
 - Receita híbrida: extrato bancário CSV + lançamento rápido “Receita do dia” (dinheiro / PIX / cartão)
 - Sem Conta Azul, antecipação, OF/NF, agenda ou comissões no v1
-- Referência visual/UX: Painel Financeiro do Evo SI
+- Referência visual/UX: Painel Financeiro do Evo SI (operate density); brand world is Light Sage Operate Shell (see root DESIGN.md)
 
 ## Modelo
 

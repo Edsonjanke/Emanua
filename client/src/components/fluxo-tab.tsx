@@ -52,6 +52,7 @@ export default function FluxoTab() {
   const [modal, setModal] = useState<LancamentoEdit | null>(null);
   const [planilhaOpen, setPlanilhaOpen] = useState(false);
   const [saldoInicial, setSaldoInicial] = useState({ data: "", valor: "" });
+  const [reconcileBusy, setReconcileBusy] = useState(false);
 
   const q = useQuery({
     queryKey: ["fluxo", incluirDas, incluirProLabore],
@@ -139,7 +140,7 @@ export default function FluxoTab() {
   }
 
   async function removeItem(tipo: LancamentoTipo, id: string) {
-    if (!confirm("Excluir este lançamento?")) return;
+    if (!confirm("Excluir este lançamento do caixa? Esta ação não pode ser desfeita.")) return;
     try {
       if (tipo === "receita") await api.delete(`/api/receitas-dia/${id}`);
       else if (tipo === "pagar") await api.delete(`/api/contas-pagar/${id}`);
@@ -164,11 +165,11 @@ export default function FluxoTab() {
     }));
   }, [q.data]);
 
-  if (q.isLoading) return <p className="text-[var(--text-muted)]">Carregando fluxo…</p>;
+  if (q.isLoading) return <p className="text-[var(--text-muted)]">Carregando o fluxo de caixa…</p>;
   if (q.isError) {
     return (
       <div className="text-[var(--red)]">
-        Erro ao carregar.{" "}
+        Não foi possível carregar o fluxo.{" "}
         <button type="button" className="underline" onClick={() => q.refetch()}>
           Tentar de novo
         </button>
@@ -180,382 +181,403 @@ export default function FluxoTab() {
   const m = d.metas;
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3 flex flex-wrap gap-x-6 gap-y-2 items-center text-sm">
-        <span className="text-xs uppercase tracking-wide text-[var(--text-muted)] font-medium">
-          Faturamento do mês
-        </span>
-        <span>
-          Meta <strong className="text-white ml-1">{format(m.metaFaturamento)}</strong>
-        </span>
-        <span>
-          Projeção <strong className="text-[var(--accent)] ml-1">{format(m.projecao)}</strong>
-        </span>
-        <span>
-          Realizado <strong className="text-[var(--green)] ml-1">{format(m.realizado)}</strong>
-        </span>
-        <span>
-          Mínimo <strong className="ml-1">{format(m.minimo)}</strong>
-        </span>
-        <span>
-          Ponto eq.{" "}
-          <strong className="ml-1">{m.pontoEquilibrio != null ? format(m.pontoEquilibrio) : "—"}</strong>
-        </span>
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex flex-wrap gap-2 items-center">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={importMut.isPending}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
-          >
-            {importMut.isPending ? "Importando CSV…" : "Importar CSV"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPlanilhaOpen(true)}
-            className="rounded-lg border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-          >
-            Importar planilha
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importMut.mutate(f);
-              e.target.value = "";
-            }}
+    <div className="flex flex-col gap-8">
+      {/* Today band: cash KPIs + daily creates + lançamentos */}
+      <section className="flex flex-col gap-3" aria-label="Caixa de hoje">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Kpi
+            label="Saldo real hoje"
+            value={d.saldoRealHoje != null ? format(d.saldoRealHoje) : "Defina o saldo inicial"}
+            note={d.conta?.nome ?? "Use a data e o valor em Importações"}
+            size="lead"
           />
+          <Kpi
+            label="Saldo projetado"
+            value={
+              d.saldoProjetadoHoje != null
+                ? format(d.saldoProjetadoHoje)
+                : d.saldoRealHoje != null
+                  ? format(d.saldoRealHoje)
+                  : "—"
+            }
+            tone="accent"
+            note="Saldo real + entradas e saídas previstas para hoje"
+            size="lead"
+          />
+          <Kpi
+            label="A receber (30 dias)"
+            value={format(d.aReceber30)}
+            tone="green"
+            note="Valores ainda não recebidos"
+            size="compact"
+          />
+          <Kpi label="A pagar (30 dias)" value={format(d.aPagar30)} tone="red" note="Contas ainda não pagas" size="compact" />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setModal({ tipo: "receita" })}
-            className="rounded-lg border border-[var(--green)]/40 text-[var(--green)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+            className="rounded-lg border border-[var(--green)]/40 bg-[var(--bg-card)] text-[var(--green)] px-4 py-2 text-sm hover:bg-[var(--sage)]/50"
           >
-            + Receita
+            + Receita do dia
           </button>
           <button
             type="button"
             onClick={() => setModal({ tipo: "pagar" })}
-            className="rounded-lg border border-[var(--red)]/40 text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+            className="rounded-lg border border-[var(--red)]/40 bg-[var(--bg-card)] text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg)]"
           >
-            + Despesa
+            + Conta a pagar
           </button>
-          <button
-            type="button"
-            onClick={() => contasFileRef.current?.click()}
-            disabled={importContasMut.isPending}
-            className="rounded-lg border border-[var(--red)]/40 text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
-          >
-            {importContasMut.isPending ? "Importando…" : "Importar a pagar"}
-          </button>
-          <input
-            ref={contasFileRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importContasMut.mutate(f);
-              e.target.value = "";
-            }}
-          />
           <button
             type="button"
             onClick={() => setModal({ tipo: "receber" })}
-            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+            className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-4 py-2 text-sm hover:bg-[var(--sage)]/40"
           >
-            + A receber
+            + Valor a receber
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              api.post("/api/extrato/reconciliar", {}).then((r: any) => {
-                toast.success(`${r.matches} conciliadas`);
-                refresh();
-              })
-            }
-            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-          >
-            Reconciliar
-          </button>
-          {d.ultimaDataExtrato && (
-            <span className="text-xs text-[var(--text-muted)] ml-2">
-              Extrato até {formatDateBR(d.ultimaDataExtrato)}
-            </span>
-          )}
-          <div className="flex gap-2 ml-auto text-xs items-center">
-            <label className="flex items-center gap-1.5 text-[var(--text-muted)]">
-              Âncora
-              <input
-                type="date"
-                className="rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5"
-                value={saldoInicial.data}
-                onChange={(e) => setSaldoInicial((s) => ({ ...s, data: e.target.value }))}
-              />
-              <input
-                type="number"
-                placeholder="Saldo"
-                className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-1 py-0.5"
-                value={saldoInicial.valor}
-                onChange={(e) => setSaldoInicial((s) => ({ ...s, valor: e.target.value }))}
-              />
-            </label>
-          </div>
         </div>
-        <p className="text-[10px] text-[var(--text-muted)] leading-tight">
-          Importar CSV: Gendo <em>transacoes.csv</em> · Importar a pagar: <em>transacoes_contas.csv</em>
-        </p>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi
-          label="Saldo real hoje"
-          value={d.saldoRealHoje != null ? format(d.saldoRealHoje) : "— configure âncora"}
-          note={d.conta?.nome}
-        />
-        <Kpi
-          label="Saldo projetado"
-          value={
-            d.saldoProjetadoHoje != null
-              ? format(d.saldoProjetadoHoje)
-              : d.saldoRealHoje != null
-                ? format(d.saldoRealHoje)
-                : "—"
-          }
-          tone="accent"
-          note="caixa após previsões de hoje"
-        />
-        <Kpi label="A receber 30d" value={format(d.aReceber30)} tone="green" note="recebíveis abertos" />
-        <Kpi label="A pagar 30d" value={format(d.aPagar30)} tone="red" />
-      </div>
-
-      <div className="flex flex-wrap gap-4 text-sm">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={incluirProLabore}
-            onChange={(e) => setIncluirProLabore(e.target.checked)}
-          />
-          Incluir pró-labore no fluxo
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={incluirDas} onChange={(e) => setIncluirDas(e.target.checked)} />
-          Incluir DAS no fluxo
-        </label>
-      </div>
-
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
-        <h2 className="text-sm uppercase tracking-wide text-[var(--text-muted)] mb-3">
-          Saldo real × projetado
-        </h2>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData}>
-              <CartesianGrid stroke="#30363d" strokeDasharray="3 3" />
-              <XAxis dataKey="data" tick={{ fill: "#8b949e", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#8b949e", fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{ background: "#161b22", border: "1px solid #30363d" }}
-                formatter={(v: number) => format(v)}
-              />
-              <Legend />
-              <ReferenceLine
-                x={d.hoje.slice(5)}
-                stroke="#8b949e"
-                strokeDasharray="4 4"
-                label={{ value: "hoje", fill: "#8b949e", fontSize: 11 }}
-              />
-              <Bar dataKey="entradas" name="Entradas" fill="#3fb950" opacity={0.7} />
-              <Bar dataKey="saidas" name="Saídas" fill="#f85149" opacity={0.7} />
-              <Line
-                type="monotone"
-                dataKey="saldoReal"
-                name="Saldo real"
-                stroke="#2f81f7"
-                strokeWidth={2}
-                dot={false}
-                connectNulls
-              />
-              <Line
-                type="monotone"
-                dataKey="saldoProjetado"
-                name="Saldo projetado"
-                stroke="#2f81f7"
-                strokeWidth={2}
-                strokeDasharray="6 4"
-                dot={false}
-                connectNulls
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <h2 className="text-sm uppercase tracking-wide text-[var(--text-muted)]">
-            Lançamentos / compensações
-          </h2>
-          <div className="flex gap-1">
-            <button
-              type="button"
-              className="text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[var(--bg)]"
-              onClick={() => setModal({ tipo: "receita" })}
-            >
-              + Receita
-            </button>
-            <button
-              type="button"
-              className="text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[var(--bg)]"
-              onClick={() => setModal({ tipo: "pagar" })}
-            >
-              + Despesa
-            </button>
-            <button
-              type="button"
-              className="text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[var(--bg)]"
-              onClick={() => setModal({ tipo: "receber" })}
-            >
-              + A receber
-            </button>
-          </div>
-        </div>
-        <div className="space-y-3 max-h-[28rem] overflow-y-auto">
-          {d.dias.length === 0 && (
-            <p className="text-sm text-[var(--text-muted)]">
-              Nenhum lançamento no período. Use os botões acima para criar.
-            </p>
-          )}
-          {d.dias.map((dia) => (
-            <div key={dia.data} className="border-b border-[var(--border)] pb-3 last:border-0">
-              <div className="flex items-center gap-2 flex-wrap text-sm mb-1">
-                <p className="font-medium">
-                  {formatDateBR(dia.data)}{" "}
-                  <span className="text-[var(--text-muted)] font-normal">{formatWeekday(dia.data)}</span>
-                </p>
-                {(dia.isHoje || dia.data === d.hoje) && (
-                  <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
-                    hoje
-                  </span>
-                )}
-                {dia.totalEntradas > 0 && (
-                  <span className="tabular-nums text-[var(--green)] text-xs">+{format(dia.totalEntradas)}</span>
-                )}
-                {dia.totalSaidas > 0 && (
-                  <span className="tabular-nums text-[var(--red)] text-xs">−{format(dia.totalSaidas)}</span>
-                )}
-                {dia.saldoProjetado != null && (
-                  <span
-                    className={`ml-auto tabular-nums text-xs ${
-                      dia.saldoProjetado < 0 ? "text-[var(--red)] font-semibold" : "text-[var(--accent)]"
-                    }`}
-                  >
-                    {dia.isPassado ? "saldo" : "saldo proj."} {format(dia.saldoProjetado)}
-                  </span>
-                )}
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
+          <h2 className="text-sm font-medium text-[var(--text)] mb-3">Lançamentos do caixa</h2>
+          <div className="space-y-3 max-h-[28rem] overflow-y-auto">
+            {d.dias.length === 0 && (
+              <p className="text-sm text-[var(--text-muted)]">
+                Ainda não há lançamentos neste período. Comece com <strong>+ Receita do dia</strong> ou{" "}
+                <strong>+ Conta a pagar</strong>.
+              </p>
+            )}
+            {d.dias.map((dia) => (
+              <div key={dia.data} className="border-b border-[var(--border)] pb-3 last:border-0">
+                <div className="flex items-center gap-2 flex-wrap text-sm mb-1">
+                  <p className="font-medium">
+                    {formatDateBR(dia.data)}{" "}
+                    <span className="text-[var(--text-muted)] font-normal">{formatWeekday(dia.data)}</span>
+                  </p>
+                  {(dia.isHoje || dia.data === d.hoje) && (
+                    <span className="text-xs uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
+                      hoje
+                    </span>
+                  )}
+                  {dia.totalEntradas > 0 && (
+                    <span className="tabular-nums text-[var(--green)] text-xs">+{format(dia.totalEntradas)}</span>
+                  )}
+                  {dia.totalSaidas > 0 && (
+                    <span className="tabular-nums text-[var(--red)] text-xs">−{format(dia.totalSaidas)}</span>
+                  )}
+                  {dia.saldoProjetado != null && (
+                    <span
+                      className={`ml-auto tabular-nums text-xs ${
+                        dia.saldoProjetado < 0 ? "text-[var(--red)] font-semibold" : "text-[var(--accent)]"
+                      }`}
+                    >
+                      {dia.isPassado ? "Saldo" : "Projetado"} {format(dia.saldoProjetado)}
+                    </span>
+                  )}
+                </div>
+                <ul className="text-sm space-y-1">
+                  {dia.entradas?.map((e: any) => (
+                    <li key={e.id || `e-${e.clienteNome}-${e.valor}`} className="flex items-center gap-2 group">
+                      <span className="text-[var(--green)] flex-1 min-w-0">
+                        + {format(e.valor)} · {e.clienteNome}
+                        {e.descricao ? ` — ${e.descricao}` : ""}
+                        {e.tipo === "receita" && (
+                          <span className="text-[var(--text-muted)] text-xs ml-1">receita</span>
+                        )}
+                        {e.tipo === "recebivel" && (
+                          <span className="text-[var(--text-muted)] text-xs ml-1">a receber</span>
+                        )}
+                      </span>
+                      {e.id && e.tipo && (
+                        <span className="opacity-70 group-hover:opacity-100 flex gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)]"
+                            title="Editar"
+                            aria-label="Editar"
+                            onClick={() =>
+                              setModal({
+                                id: e.id,
+                                tipo: e.tipo === "recebivel" ? "receber" : "receita",
+                                data: e.data || dia.data,
+                                dataVencimento: e.dataVencimento || dia.data,
+                                valor: e.valor,
+                                forma: e.forma,
+                                observacao: e.observacao || e.descricao,
+                                descricao: e.descricao,
+                                clienteNome: e.clienteNome,
+                                observacoes: e.observacoes,
+                                status: e.status,
+                              })
+                            }
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)] text-[var(--red)]"
+                            title="Excluir"
+                            aria-label="Excluir"
+                            onClick={() =>
+                              removeItem(e.tipo === "recebivel" ? "receber" : "receita", e.id)
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                  {dia.saidas?.map((s: any) => (
+                    <li key={s.id || `s-${s.descricao}-${s.valor}`} className="flex items-center gap-2 group">
+                      <span className="text-[var(--red)] flex-1 min-w-0">
+                        − {format(s.valor)} · {s.descricao}
+                        {s.categoria ? ` (${s.categoria})` : ""}
+                      </span>
+                      {s.id && (
+                        <span className="opacity-70 group-hover:opacity-100 flex gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)]"
+                            title="Editar"
+                            aria-label="Editar"
+                            onClick={() =>
+                              setModal({
+                                id: s.id,
+                                tipo: "pagar",
+                                data: s.dataVencimento || dia.data,
+                                dataVencimento: s.dataVencimento || dia.data,
+                                valor: s.valor,
+                                descricao: s.descricao,
+                                categoria: s.categoria,
+                                recorrencia: s.recorrencia,
+                                observacoes: s.observacoes,
+                                status: s.status,
+                              })
+                            }
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)] text-[var(--red)]"
+                            title="Excluir"
+                            aria-label="Excluir"
+                            onClick={() => removeItem("pagar", s.id)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="text-sm space-y-1">
-                {dia.entradas?.map((e: any) => (
-                  <li key={e.id || `e-${e.clienteNome}-${e.valor}`} className="flex items-center gap-2 group">
-                    <span className="text-[var(--green)] flex-1 min-w-0">
-                      + {format(e.valor)} · {e.clienteNome}
-                      {e.descricao ? ` — ${e.descricao}` : ""}
-                      {e.tipo === "receita" && (
-                        <span className="text-[var(--text-muted)] text-xs ml-1">receita</span>
-                      )}
-                      {e.tipo === "recebivel" && (
-                        <span className="text-[var(--text-muted)] text-xs ml-1">a receber</span>
-                      )}
-                    </span>
-                    {e.id && e.tipo && (
-                      <span className="opacity-70 group-hover:opacity-100 flex gap-1 shrink-0">
-                        <button
-                          type="button"
-                          className="p-1 rounded hover:bg-[var(--bg)]"
-                          title="Editar"
-                          onClick={() =>
-                            setModal({
-                              id: e.id,
-                              tipo: e.tipo === "recebivel" ? "receber" : "receita",
-                              data: e.data || dia.data,
-                              dataVencimento: e.dataVencimento || dia.data,
-                              valor: e.valor,
-                              forma: e.forma,
-                              observacao: e.observacao || e.descricao,
-                              descricao: e.descricao,
-                              clienteNome: e.clienteNome,
-                              observacoes: e.observacoes,
-                              status: e.status,
-                            })
-                          }
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="p-1 rounded hover:bg-[var(--bg)] text-[var(--red)]"
-                          title="Excluir"
-                          onClick={() =>
-                            removeItem(e.tipo === "recebivel" ? "receber" : "receita", e.id)
-                          }
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </span>
-                    )}
-                  </li>
-                ))}
-                {dia.saidas?.map((s: any) => (
-                  <li key={s.id || `s-${s.descricao}-${s.valor}`} className="flex items-center gap-2 group">
-                    <span className="text-[var(--red)] flex-1 min-w-0">
-                      − {format(s.valor)} · {s.descricao}
-                      {s.categoria ? ` (${s.categoria})` : ""}
-                    </span>
-                    {s.id && (
-                      <span className="opacity-70 group-hover:opacity-100 flex gap-1 shrink-0">
-                        <button
-                          type="button"
-                          className="p-1 rounded hover:bg-[var(--bg)]"
-                          title="Editar"
-                          onClick={() =>
-                            setModal({
-                              id: s.id,
-                              tipo: "pagar",
-                              data: s.dataVencimento || dia.data,
-                              dataVencimento: s.dataVencimento || dia.data,
-                              valor: s.valor,
-                              descricao: s.descricao,
-                              categoria: s.categoria,
-                              recorrencia: s.recorrencia,
-                              observacoes: s.observacoes,
-                              status: s.status,
-                            })
-                          }
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="p-1 rounded hover:bg-[var(--bg)] text-[var(--red)]"
-                          title="Excluir"
-                          onClick={() => removeItem("pagar", s.id)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      </section>
+
+      {/* Analysis band */}
+      <section className="flex flex-col gap-3" aria-label="Análise">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h2 className="text-sm font-medium text-[var(--text)]">Saldo real × projetado</h2>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label
+                className="flex items-center gap-2 cursor-pointer text-[var(--text-muted)]"
+                title="Inclui retiradas pessoais dos sócios no gráfico"
+              >
+                <input
+                  type="checkbox"
+                  checked={incluirProLabore}
+                  onChange={(e) => setIncluirProLabore(e.target.checked)}
+                />
+                Incluir pró-labore
+              </label>
+              <label
+                className="flex items-center gap-2 cursor-pointer text-[var(--text-muted)]"
+                title="Inclui o DAS (imposto do Simples Nacional) no gráfico"
+              >
+                <input type="checkbox" checked={incluirDas} onChange={(e) => setIncluirDas(e.target.checked)} />
+                Incluir DAS (Simples)
+              </label>
+            </div>
+          </div>
+          <div className="h-72 md:h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData}>
+                <CartesianGrid stroke="#bed3b2" strokeDasharray="3 3" />
+                <XAxis dataKey="data" tick={{ fill: "#516335", fontSize: 11 }} />
+                <YAxis tick={{ fill: "#516335", fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ background: "#ffffff", border: "1px solid #bed3b2", color: "#172416" }}
+                  formatter={(v: number) => format(v)}
+                />
+                <Legend />
+                <ReferenceLine
+                  x={d.hoje.slice(5)}
+                  stroke="#516335"
+                  strokeDasharray="4 4"
+                  label={{ value: "hoje", fill: "#516335", fontSize: 11 }}
+                />
+                <Bar dataKey="entradas" name="Entradas" fill="#85ad61" opacity={0.8} />
+                <Bar dataKey="saidas" name="Saídas" fill="#c45c52" opacity={0.8} />
+                <Line
+                  type="monotone"
+                  dataKey="saldoReal"
+                  name="Saldo real"
+                  stroke="#3d5f3b"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="saldoProjetado"
+                  name="Saldo projetado"
+                  stroke="#559265"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                  dot={false}
+                  connectNulls
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3 flex flex-wrap gap-x-6 gap-y-2 items-center text-sm">
+          <span className="text-xs text-[var(--text-muted)] font-medium">Faturamento do mês</span>
+          <span>
+            Meta <strong className="text-[var(--text)] ml-1">{format(m.metaFaturamento)}</strong>
+          </span>
+          <span>
+            Projeção <strong className="text-[var(--accent)] ml-1">{format(m.projecao)}</strong>
+          </span>
+          <span>
+            Realizado <strong className="text-[var(--green)] ml-1">{format(m.realizado)}</strong>
+          </span>
+          <span>
+            Mínimo <strong className="ml-1">{format(m.minimo)}</strong>
+          </span>
+          <span>
+            Ponto de equilíbrio{" "}
+            <strong className="ml-1">{m.pontoEquilibrio != null ? format(m.pontoEquilibrio) : "—"}</strong>
+          </span>
+        </div>
+      </section>
+
+      {/* Rare tools: imports / reconcile / âncora */}
+      <section className="flex flex-col gap-2" aria-label="Importações e conciliação">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={importMut.isPending}
+              title="Importa o extrato do Gendo (transacoes.csv)"
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
+            >
+              {importMut.isPending ? "Importando extrato…" : "Importar extrato (CSV)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlanilhaOpen(true)}
+              title="Planilha XLSX de entradas e saídas"
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
+            >
+              Importar planilha
+            </button>
+            <button
+              type="button"
+              onClick={() => contasFileRef.current?.click()}
+              disabled={importContasMut.isPending}
+              title="Importa contas do Gendo (transacoes_contas.csv)"
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
+            >
+              {importContasMut.isPending ? "Importando contas…" : "Importar contas a pagar"}
+            </button>
+            <button
+              type="button"
+              title="Associa lançamentos do extrato com receitas e despesas"
+              disabled={reconcileBusy}
+              onClick={async () => {
+                setReconcileBusy(true);
+                try {
+                  const r: any = await api.post("/api/extrato/reconciliar", {});
+                  toast.success(
+                    r.matches
+                      ? `${r.matches} lançamento(ns) conciliado(s) com o extrato`
+                      : "Nenhum lançamento novo para conciliar",
+                  );
+                  refresh();
+                } catch (e: any) {
+                  toast.error(e.message || "Não foi possível conciliar o extrato");
+                } finally {
+                  setReconcileBusy(false);
+                }
+              }}
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
+            >
+              {reconcileBusy ? "Conciliando…" : "Conciliar extrato"}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importMut.mutate(f);
+                e.target.value = "";
+              }}
+            />
+            <input
+              ref={contasFileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importContasMut.mutate(f);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2 items-end text-xs text-[var(--text-muted)]">
+            <label className="flex flex-col gap-1">
+              <span title="Data e valor do saldo bancário a partir do qual o extrato começa">
+                Saldo inicial (âncora)
+              </span>
+              <span className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  aria-label="Data do saldo inicial"
+                  className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-1"
+                  value={saldoInicial.data}
+                  onChange={(e) => setSaldoInicial((s) => ({ ...s, data: e.target.value }))}
+                />
+                <input
+                  type="number"
+                  placeholder="R$"
+                  aria-label="Valor do saldo inicial"
+                  className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-1"
+                  value={saldoInicial.valor}
+                  onChange={(e) => setSaldoInicial((s) => ({ ...s, valor: e.target.value }))}
+                />
+              </span>
+            </label>
+            {d.ultimaDataExtrato && (
+              <span>Último extrato: {formatDateBR(d.ultimaDataExtrato)}</span>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-[var(--text-muted)] leading-snug">
+          Extrato: arquivo <em>transacoes.csv</em> do Gendo · Contas a pagar:{" "}
+          <em>transacoes_contas.csv</em>
+        </p>
+      </section>
 
       {modal && (
         <FluxoLancamentoModal
@@ -585,11 +607,13 @@ function Kpi({
   value,
   note,
   tone,
+  size = "lead",
 }: {
   label: string;
   value: string;
   note?: string;
   tone?: "green" | "red" | "accent";
+  size?: "lead" | "compact";
 }) {
   const color =
     tone === "green"
@@ -598,11 +622,13 @@ function Kpi({
         ? "text-[var(--red)]"
         : tone === "accent"
           ? "text-[var(--accent)]"
-          : "text-white";
+          : "text-[var(--text)]";
+  const pad = size === "compact" ? "px-4 py-3" : "p-4";
+  const valueSize = size === "compact" ? "text-xl" : "text-3xl";
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
-      <p className={`text-2xl mt-1 ${color}`}>{value}</p>
+    <div className={`rounded-xl border border-[var(--border)] bg-[var(--bg-card)] ${pad}`}>
+      <p className="text-xs text-[var(--text-muted)]">{label}</p>
+      <p className={`${valueSize} mt-1 tabular-nums ${color}`}>{value}</p>
       {note && <p className="text-xs text-[var(--text-muted)] mt-1">{note}</p>}
     </div>
   );

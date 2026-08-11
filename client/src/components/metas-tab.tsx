@@ -89,7 +89,7 @@ export default function MetasTab() {
           <button
             type="button"
             onClick={() => saveMeta.mutate()}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)]"
           >
             Salvar
           </button>
@@ -172,7 +172,7 @@ export default function MetasTab() {
 
 function Card({ label, value, tone }: { label: string; value: string; tone?: string }) {
   const color =
-    tone === "green" ? "text-[var(--green)]" : tone === "blue" ? "text-[var(--accent)]" : "text-white";
+    tone === "green" ? "text-[var(--green)]" : tone === "blue" ? "text-[var(--accent)]" : "text-[var(--text)]";
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
       <p className="text-xs uppercase text-[var(--text-muted)]">{label}</p>

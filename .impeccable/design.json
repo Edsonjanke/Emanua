@@ -1,0 +1,415 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-11T22:47:00.000Z",
+  "title": "Design System: Emanua Financeiro",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Mint Base",
+        "canonical": "#ebf5e9",
+        "tonalRamp": [
+          "#1a2418",
+          "#2e3c2a",
+          "#465844",
+          "#647860",
+          "#8a9e84",
+          "#b4c8ae",
+          "#d4e3c4",
+          "#ebf5e9"
+        ]
+      },
+      "bg-elevated": {
+        "role": "neutral",
+        "displayName": "Cream Elevated",
+        "canonical": "#f7faf4",
+        "tonalRamp": [
+          "#1c261a",
+          "#324030",
+          "#4c5e48",
+          "#6c8068",
+          "#94a88e",
+          "#c0d0ba",
+          "#e2ecd8",
+          "#f7faf4"
+        ]
+      },
+      "bg-card": {
+        "role": "neutral",
+        "displayName": "White Card",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#1e2a1c",
+          "#364434",
+          "#526450",
+          "#748870",
+          "#9eb098",
+          "#c8d8c4",
+          "#e8f0e4",
+          "#ffffff"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Seafoam Border",
+        "canonical": "#bed3b2",
+        "tonalRamp": [
+          "#243628",
+          "#3a5040",
+          "#526e58",
+          "#6e8c72",
+          "#8eac90",
+          "#bed3b2",
+          "#d8e6d0",
+          "#eef4ea"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Jungle Text",
+        "canonical": "#172416",
+        "tonalRamp": [
+          "#172416",
+          "#2e3c28",
+          "#465840",
+          "#64785c",
+          "#8a9e80",
+          "#b4c8a8",
+          "#d4e3c4",
+          "#ebf5e9"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Moss Muted",
+        "canonical": "#516335",
+        "tonalRamp": [
+          "#2a3418",
+          "#3c4a24",
+          "#516335",
+          "#6a8050",
+          "#8aa070",
+          "#acc094",
+          "#c8d8b8",
+          "#e4ecd8"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Moss Accent",
+        "canonical": "#559265",
+        "tonalRamp": [
+          "#1a2e20",
+          "#2a4834",
+          "#3c6648",
+          "#559265",
+          "#6eaa7e",
+          "#8ec29e",
+          "#b4d8c0",
+          "#daf0e0"
+        ]
+      },
+      "accent-strong": {
+        "role": "primary",
+        "displayName": "Forest Strong",
+        "canonical": "#3d5f3b",
+        "tonalRamp": [
+          "#142018",
+          "#243828",
+          "#3d5f3b",
+          "#557a52",
+          "#749870",
+          "#98b894",
+          "#c0d6bc",
+          "#e0ece0"
+        ]
+      },
+      "green": {
+        "role": "primary",
+        "displayName": "Forest Income",
+        "canonical": "#3d5f3b",
+        "tonalRamp": [
+          "#142018",
+          "#243828",
+          "#3d5f3b",
+          "#557a52",
+          "#749870",
+          "#98b894",
+          "#c0d6bc",
+          "#e0ece0"
+        ]
+      },
+      "red": {
+        "role": "tertiary",
+        "displayName": "Coral Expense",
+        "canonical": "#c45c52",
+        "tonalRamp": [
+          "#3a1814",
+          "#5c2820",
+          "#8a4038",
+          "#c45c52",
+          "#e06c60",
+          "#e89088",
+          "#f0b4ae",
+          "#f8d8d4"
+        ]
+      },
+      "brand": {
+        "role": "primary",
+        "displayName": "Grass Brand",
+        "canonical": "#85ad61",
+        "tonalRamp": [
+          "#2e3818",
+          "#465828",
+          "#688040",
+          "#85ad61",
+          "#9ec07a",
+          "#b6d494",
+          "#cee8b4",
+          "#e6f6d8"
+        ]
+      },
+      "sage": {
+        "role": "secondary",
+        "displayName": "Sage Soft",
+        "canonical": "#d4e3c4",
+        "tonalRamp": [
+          "#2a3220",
+          "#485438",
+          "#687850",
+          "#90a878",
+          "#b8c8a0",
+          "#d4e3c4",
+          "#e2ecd8",
+          "#f0f6ec"
+        ]
+      },
+      "pine": {
+        "role": "secondary",
+        "displayName": "Meadow Pine",
+        "canonical": "#78a45a",
+        "tonalRamp": [
+          "#1c2c14",
+          "#2e4824",
+          "#4a6c3a",
+          "#78a45a",
+          "#90bc74",
+          "#acd094",
+          "#c8e4b8",
+          "#e4f4dc"
+        ]
+      },
+      "focus-ring": {
+        "role": "primary",
+        "displayName": "Moss Focus",
+        "canonical": "#559265",
+        "tonalRamp": [
+          "#1a2e20",
+          "#2a4834",
+          "#3c6648",
+          "#559265",
+          "#6eaa7e",
+          "#8ec29e",
+          "#b4d8c0",
+          "#daf0e0"
+        ]
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "On Accent",
+        "canonical": "#ebf5e9",
+        "tonalRamp": [
+          "#ebf5e9"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Brand Serif",
+        "purpose": "Emanua wordmark on header, login, and branded loading only."
+      },
+      "headline": {
+        "displayName": "Modal Title",
+        "purpose": "DM Sans titles for dialogs and rare lead-ins."
+      },
+      "title": {
+        "displayName": "Section Title",
+        "purpose": "Operational card h2 / section headers."
+      },
+      "body": {
+        "displayName": "UI Body",
+        "purpose": "Lists, tables, forms, and controls."
+      },
+      "label": {
+        "displayName": "Quiet Label",
+        "purpose": "KPI labels, field captions, muted subtitles (0.75rem). Chip 10px is component-local."
+      }
+    },
+    "shadows": [
+      {
+        "name": "login-lift",
+        "value": "0 12px 40px rgba(23,36,22,0.12)",
+        "purpose": "Auth card elevation only; operate cards stay flat."
+      }
+    ],
+    "motion": [
+      {
+        "name": "color-swap",
+        "value": "transition-colors",
+        "purpose": "Tab and hover color transitions; no bounce or glow motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "content",
+        "value": "80rem"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Filled moss accent action for submit and save.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Entrar</button>",
+      "css": ".ds-btn-primary { background: var(--accent, #559265); color: var(--on-accent, #ebf5e9); padding: 10px 16px; border: none; border-radius: 8px; font-family: \"DM Sans\", system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: background 0.15s ease; } .ds-btn-primary:hover { background: var(--accent-strong, #3d5f3b); } .ds-btn-primary:focus-visible { outline: 2px solid var(--focus-ring, #559265); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Bordered utility control for imports and secondary creates.",
+      "html": "<button class=\"ds-btn-ghost\" type=\"button\">Importar CSV</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: var(--text, #172416); padding: 8px 16px; border: 1px solid var(--border, #bed3b2); border-radius: 8px; font-family: \"DM Sans\", system-ui, sans-serif; font-size: 0.875rem; cursor: pointer; transition: background 0.15s ease; } .ds-btn-ghost:hover { background: var(--bg-card, #ffffff); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--focus-ring, #559265); outline-offset: 2px; }"
+    },
+    {
+      "name": "Income Outline Button",
+      "kind": "button",
+      "refersTo": "button-income",
+      "description": "Daily create for receita — forest green outline.",
+      "html": "<button class=\"ds-btn-income\" type=\"button\">+ Receita</button>",
+      "css": ".ds-btn-income { background: transparent; color: var(--green, #3d5f3b); padding: 8px 16px; border: 1px solid color-mix(in srgb, var(--green, #3d5f3b) 40%, transparent); border-radius: 8px; font-family: \"DM Sans\", system-ui, sans-serif; font-size: 0.875rem; cursor: pointer; transition: background 0.15s ease; } .ds-btn-income:hover { background: var(--bg-card, #ffffff); } .ds-btn-income:focus-visible { outline: 2px solid var(--focus-ring, #559265); outline-offset: 2px; }"
+    },
+    {
+      "name": "Expense Outline Button",
+      "kind": "button",
+      "refersTo": "button-expense",
+      "description": "Daily create for despesa — coral outline.",
+      "html": "<button class=\"ds-btn-expense\" type=\"button\">+ Despesa</button>",
+      "css": ".ds-btn-expense { background: transparent; color: var(--red, #c45c52); padding: 8px 16px; border: 1px solid color-mix(in srgb, var(--red, #c45c52) 40%, transparent); border-radius: 8px; font-family: \"DM Sans\", system-ui, sans-serif; font-size: 0.875rem; cursor: pointer; transition: background 0.15s ease; } .ds-btn-expense:hover { background: var(--bg-card, #ffffff); } .ds-btn-expense:focus-visible { outline: 2px solid var(--focus-ring, #559265); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Mint-filled field with seafoam border; focus lifts to forest strong.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Usuário</span><input class=\"ds-input\" type=\"text\" placeholder=\"\" /></label>",
+      "css": ".ds-field { display: block; font-family: \"DM Sans\", system-ui, sans-serif; } .ds-field-label { display: block; font-size: 0.75rem; color: var(--text-muted, #516335); margin-bottom: 4px; } .ds-input { width: 100%; background: var(--bg, #ebf5e9); color: var(--text, #172416); border: 1px solid var(--border, #bed3b2); border-radius: 8px; padding: 8px 12px; font: inherit; } .ds-input:focus { outline: none; border-color: var(--accent-strong, #3d5f3b); } .ds-input:focus-visible { outline: 2px solid var(--focus-ring, #559265); outline-offset: 2px; }"
+    },
+    {
+      "name": "Primary Tab Nav",
+      "kind": "nav",
+      "refersTo": "nav-tab-active",
+      "description": "Sticky section tabs; active uses grass brand underline.",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"Seções\"><button class=\"ds-tab\" type=\"button\">Metas</button><button class=\"ds-tab ds-tab-active\" type=\"button\">Fluxo</button><button class=\"ds-tab\" type=\"button\">DRE</button></nav>",
+      "css": ".ds-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border, #bed3b2); font-family: \"DM Sans\", system-ui, sans-serif; } .ds-tab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-muted, #516335); padding: 8px 12px; font-size: 0.875rem; cursor: pointer; white-space: nowrap; transition: color 0.15s ease, border-color 0.15s ease; } .ds-tab:hover { color: var(--text, #172416); } .ds-tab-active { color: var(--text, #172416); border-bottom-color: var(--brand, #85ad61); } .ds-tab:focus-visible { outline: 2px solid var(--focus-ring, #559265); outline-offset: 2px; }"
+    },
+    {
+      "name": "Operate Card",
+      "kind": "card",
+      "refersTo": "card-surface",
+      "description": "Bordered white card for sections, tables, and lists.",
+      "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Lançamentos / compensações</h2><p class=\"ds-card-body\">Nenhum lançamento no período.</p></section>",
+      "css": ".ds-card { background: var(--bg-card, #ffffff); color: var(--text, #172416); border: 1px solid var(--border, #bed3b2); border-radius: 12px; padding: 16px; font-family: \"DM Sans\", system-ui, sans-serif; } .ds-card-title { margin: 0 0 12px; font-size: 0.875rem; font-weight: 500; } .ds-card-body { margin: 0; font-size: 0.875rem; color: var(--text-muted, #516335); }"
+    },
+    {
+      "name": "KPI Tile",
+      "kind": "custom",
+      "refersTo": "kpi-card",
+      "description": "Cash KPI with muted label and large tabular value.",
+      "html": "<div class=\"ds-kpi\"><p class=\"ds-kpi-label\">Saldo real hoje</p><p class=\"ds-kpi-value\">R$ 12.450,00</p><p class=\"ds-kpi-note\">Conta principal</p></div>",
+      "css": ".ds-kpi { background: var(--bg-card, #ffffff); border: 1px solid var(--border, #bed3b2); border-radius: 12px; padding: 16px; font-family: \"DM Sans\", system-ui, sans-serif; } .ds-kpi-label { margin: 0; font-size: 0.75rem; color: var(--text-muted, #516335); } .ds-kpi-value { margin: 4px 0 0; font-size: 1.875rem; font-variant-numeric: tabular-nums; color: var(--text, #172416); line-height: 1.2; } .ds-kpi-note { margin: 4px 0 0; font-size: 0.75rem; color: var(--text-muted, #516335); }"
+    },
+    {
+      "name": "Brand Wordmark",
+      "kind": "custom",
+      "refersTo": "nav-tab-active",
+      "description": "Instrument Serif Emanua mark for shell, login, and loading.",
+      "html": "<div class=\"ds-brand-block\"><p class=\"ds-brand\">Emanua</p><p class=\"ds-brand-sub\">Massoterapia · painel financeiro</p></div>",
+      "css": ".ds-brand-block { font-family: \"DM Sans\", system-ui, sans-serif; } .ds-brand { margin: 0; font-family: \"Instrument Serif\", Georgia, serif; font-weight: 400; font-size: 1.875rem; line-height: 1; letter-spacing: -0.025em; color: var(--text, #172416); } .ds-brand-sub { margin: 4px 0 0; font-size: 0.75rem; color: var(--text-muted, #516335); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Light Sage Operate Shell",
+    "overview": "Emanua Financeiro is a light operate dashboard for daily cash control at Emanua Massoterapia. Brand presence comes from mint/sage atmosphere and an Instrument Serif wordmark — not from generic blue fintech chrome. Surfaces sit on mint canvas with white cards; money meaning is carried by forest income, coral expense, and emerald accents for actions and projected cash.\n\nDensity is operate-first: sticky brand header + section tabs, then cash KPIs and creates before analysis and imports. Interaction containers use bordered white cards on a mint tonal stack; the shell uses soft sage/seafoam radial washes.",
+    "keyCharacteristics": [
+      "Mint → sage → emerald palette as brand and UI chrome",
+      "Instrument Serif only for the Emanua wordmark / branded loading states",
+      "DM Sans for all operational UI",
+      "Cash path first (saldo → creates → lançamentos); imports demoted",
+      "Light elevation + seafoam borders; soft shadow on login only",
+      "Grass underline marks the active primary tab"
+    ],
+    "rules": [
+      {
+        "name": "The Green Is The Brand Rule",
+        "body": "Chrome, atmosphere, and success share the mint→emerald family. Do not introduce cool blues or purple fintech accents as system color.",
+        "section": "colors"
+      },
+      {
+        "name": "The Money Meaning Rule",
+        "body": "Income uses `green` (forest); expense/destructive uses `red`; projected cash uses `accent`. Do not reuse `brand` grass for money values.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Brand Flash Rule",
+        "body": "`brand` appears as the active primary-tab underline (and similarly rare brand accents) — not as fill for large surfaces.",
+        "section": "colors"
+      },
+      {
+        "name": "The Brand-Only Serif Rule",
+        "body": "Instrument Serif is reserved for `.brand` / `h1` wordmark contexts. Operational headings stay DM Sans.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Money Rule",
+        "body": "Currency and signed amounts use `tabular-nums` so columns and day totals align.",
+        "section": "typography"
+      },
+      {
+        "name": "The Cash Path First Rule",
+        "body": "First viewport after brand+tabs is saldo KPIs and daily creates; charts and CSV/import tools come after lançamentos.",
+        "section": "layout"
+      },
+      {
+        "name": "The Tonal Stack Rule",
+        "body": "Prefer a mint→white surface step over a new shadow. Shadows are exceptional (auth), not default card chrome.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep Instrument Serif on the Emanua wordmark only.",
+      "Do lead Fluxo (and similar operate views) with saldo KPIs → creates → lançamentos.",
+      "Do express income/expense with `green` / `red` and projected cash with `accent`.",
+      "Do mark the active primary tab with the grass `brand` underline.",
+      "Do build surfaces from the mint→white tonal stack with seafoam borders."
+    ],
+    "donts": [
+      "Don't put Instrument Serif on operational `h2`/section titles.",
+      "Don't introduce GitHub/generic blue as accent, link, or chart color.",
+      "Don't promote imports/CSV above the daily cash path.",
+      "Don't fill large panels with `brand` grass or treat `red` as a decorative accent.",
+      "Don't default cards to multi-layer drop shadows; login lift is the exception.",
+      "Don't reintroduce the discarded dark peat shell as system chrome."
+    ]
+  }
+}
