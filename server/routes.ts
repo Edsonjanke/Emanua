@@ -1233,17 +1233,20 @@ export async function registerRoutes(app: Express) {
     const [atual] = await db.select().from(contasPagar).where(eq(contasPagar.id, req.params.id)).limit(1);
     if (!atual) return res.status(404).json({ message: "Não encontrado" });
 
-    // Baixa com recorrência mensal
-    if (patch.status === "pago" && atual.recorrencia === "mensal" && atual.status !== "pago") {
-      const d = new Date(atual.dataVencimento + "T00:00:00Z");
+    // Baixa com recorrência mensal → cria próxima parcela
+    const ficouMensal =
+      patch.recorrencia !== undefined ? patch.recorrencia === "mensal" : atual.recorrencia === "mensal";
+    if (patch.status === "pago" && ficouMensal && atual.status !== "pago") {
+      const baseVenc = String(patch.dataVencimento ?? atual.dataVencimento);
+      const d = new Date(baseVenc + "T12:00:00Z");
       d.setUTCMonth(d.getUTCMonth() + 1);
       const nextVenc = d.toISOString().slice(0, 10);
       await db.insert(contasPagar).values({
-        descricao: atual.descricao,
-        valor: atual.valor,
+        descricao: String(patch.descricao ?? atual.descricao),
+        valor: String(patch.valor ?? atual.valor),
         dataVencimento: nextVenc,
-        categoria: atual.categoria,
-        observacoes: atual.observacoes,
+        categoria: (patch.categoria as string) ?? atual.categoria,
+        observacoes: (patch.observacoes as string) ?? atual.observacoes,
         recorrencia: "mensal",
         status: "pendente",
       });
