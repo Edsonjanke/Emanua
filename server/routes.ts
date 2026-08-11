@@ -1114,7 +1114,7 @@ export async function registerRoutes(app: Express) {
   // ── Contas a pagar ────────────────────────────────────────────────────
   app.get("/api/contas-pagar", async (req, res) => {
     const status = req.query.status ? String(req.query.status).split(",") : null;
-    let rows = await db.select().from(contasPagar).orderBy(asc(contasPagar.dataVencimento));
+    let rows = await db.select().from(contasPagar).orderBy(desc(contasPagar.dataVencimento));
     const hoje = hojeBrasil();
     // marca vencidos
     for (const r of rows) {
