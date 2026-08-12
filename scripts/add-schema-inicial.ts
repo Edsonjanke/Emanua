@@ -70,6 +70,8 @@ async function main() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_contas_pagar_vencimento ON contas_pagar(data_vencimento)`);
   await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS parcela_atual integer`);
+  await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS total_parcelas integer`);
   await db.execute(sql`DROP INDEX IF EXISTS idx_contas_pagar_import_dedup`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_contas_pagar_import_dedup
@@ -122,6 +124,41 @@ async function main() {
       data_inicio text NOT NULL,
       data_fim text,
       created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS categorias (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+      nome text NOT NULL,
+      ativo boolean NOT NULL DEFAULT true,
+      ordem integer NOT NULL DEFAULT 0,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_categorias_nome_lower
+    ON categorias (lower(nome))
+  `);
+  await db.execute(sql`
+    INSERT INTO categorias (nome, ordem, ativo)
+    SELECT v.nome, v.ordem, true
+    FROM (VALUES
+      ('Aluguel', 1),
+      ('Energia', 2),
+      ('Água', 3),
+      ('Internet', 4),
+      ('Insumos', 5),
+      ('Roupas/Lençóis', 6),
+      ('Marketing', 7),
+      ('Contabilidade', 8),
+      ('DAS', 9),
+      ('Pessoal', 10),
+      ('Pró-labore', 11),
+      ('Outros', 12)
+    ) AS v(nome, ordem)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM categorias c WHERE lower(c.nome) = lower(v.nome)
     )
   `);
 

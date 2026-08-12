@@ -14,7 +14,7 @@ import {
   custosFixos,
   metasConfig,
   proLaboreRegras,
-  CATEGORIAS_PAGAR,
+  categorias,
 } from "@shared/schema";
 import { parseExtratoArquivo } from "@shared/extrato-import";
 import { parseGendoContasPagarCsv } from "@shared/contas-pagar-import";
@@ -1055,7 +1055,13 @@ export async function registerRoutes(app: Express) {
           minimo,
           pontoEquilibrio: pe,
         },
-        categorias: CATEGORIAS_PAGAR,
+        categorias: (
+          await db
+            .select({ nome: categorias.nome })
+            .from(categorias)
+            .where(eq(categorias.ativo, true))
+            .orderBy(asc(categorias.ordem), asc(categorias.nome))
+        ).map((c) => c.nome),
       });
     } catch (e: any) {
       console.error(e);
@@ -1139,10 +1145,37 @@ export async function registerRoutes(app: Express) {
   });
 
   app.post("/api/contas-pagar", authorize("admin", "gestor"), async (req, res) => {
-    const { descricao, valor, dataVencimento, categoria, observacoes, recorrencia } = req.body ?? {};
+    const { descricao, valor, dataVencimento, categoria, observacoes, recorrencia, totalParcelas } =
+      req.body ?? {};
     if (!descricao || valor == null || !dataVencimento) {
       return res.status(400).json({ message: "descricao, valor, dataVencimento obrigatórios" });
     }
+
+    const nParcelas = Math.min(60, Math.max(0, Number(totalParcelas) || 0));
+    const isParcelado = nParcelas >= 2 && recorrencia !== "mensal";
+
+    if (isParcelado) {
+      const base = String(dataVencimento);
+      const values = [];
+      for (let i = 0; i < nParcelas; i++) {
+        const d = new Date(base + "T12:00:00Z");
+        d.setUTCMonth(d.getUTCMonth() + i);
+        values.push({
+          descricao: String(descricao),
+          valor: String(valor),
+          dataVencimento: d.toISOString().slice(0, 10),
+          categoria: categoria ?? null,
+          observacoes: observacoes ?? null,
+          recorrencia: null as null,
+          parcelaAtual: i + 1,
+          totalParcelas: nParcelas,
+          status: "pendente" as const,
+        });
+      }
+      const rows = await db.insert(contasPagar).values(values).returning();
+      return res.status(201).json({ parcelas: rows, count: rows.length });
+    }
+
     const [row] = await db
       .insert(contasPagar)
       .values({
@@ -1152,6 +1185,8 @@ export async function registerRoutes(app: Express) {
         categoria: categoria ?? null,
         observacoes: observacoes ?? null,
         recorrencia: recorrencia === "mensal" ? "mensal" : null,
+        parcelaAtual: null,
+        totalParcelas: null,
         status: "pendente",
       })
       .returning();
@@ -1235,11 +1270,26 @@ export async function registerRoutes(app: Express) {
   app.patch("/api/contas-pagar/:id", authorize("admin", "gestor"), async (req, res) => {
     const body = req.body ?? {};
     const patch: Record<string, unknown> = {};
-    for (const k of ["descricao", "valor", "dataVencimento", "categoria", "observacoes", "status", "dataPagamento", "recorrencia"]) {
+    for (const k of [
+      "descricao",
+      "valor",
+      "dataVencimento",
+      "categoria",
+      "observacoes",
+      "status",
+      "dataPagamento",
+      "recorrencia",
+    ]) {
       if (body[k] !== undefined) patch[k] = body[k] == null ? null : String(body[k]);
     }
     if (patch.valor != null) patch.valor = String(body.valor);
     if (patch.recorrencia !== undefined) patch.recorrencia = body.recorrencia === "mensal" ? "mensal" : null;
+    if (body.parcelaAtual !== undefined) {
+      patch.parcelaAtual = body.parcelaAtual == null ? null : Number(body.parcelaAtual);
+    }
+    if (body.totalParcelas !== undefined) {
+      patch.totalParcelas = body.totalParcelas == null ? null : Number(body.totalParcelas);
+    }
 
     const [atual] = await db.select().from(contasPagar).where(eq(contasPagar.id, req.params.id)).limit(1);
     if (!atual) return res.status(404).json({ message: "Não encontrado" });
@@ -1315,6 +1365,125 @@ export async function registerRoutes(app: Express) {
   app.delete("/api/recebiveis/:id", authorize("admin", "gestor"), async (req, res) => {
     await db.delete(recebiveis).where(eq(recebiveis.id, req.params.id));
     res.json({ ok: true });
+  });
+
+  // ── Categorias ────────────────────────────────────────────────────────
+  app.get("/api/categorias", async (req, res) => {
+    const todos = String(req.query.todos ?? "") === "1";
+    const rows = await db
+      .select()
+      .from(categorias)
+      .where(todos ? undefined : eq(categorias.ativo, true))
+      .orderBy(asc(categorias.ordem), asc(categorias.nome));
+    res.json(rows);
+  });
+
+  app.post("/api/categorias", authorize("admin", "gestor"), async (req, res) => {
+    const nome = String(req.body?.nome ?? "").trim();
+    if (!nome) return res.status(400).json({ message: "nome obrigatório" });
+    const [dup] = await db
+      .select({ id: categorias.id })
+      .from(categorias)
+      .where(sql`lower(${categorias.nome}) = lower(${nome})`)
+      .limit(1);
+    if (dup) return res.status(409).json({ message: "Já existe uma categoria com esse nome" });
+
+    const [{ maxOrdem }] = await db
+      .select({ maxOrdem: sql<number>`coalesce(max(${categorias.ordem}), 0)` })
+      .from(categorias);
+    const ordem =
+      req.body?.ordem != null && Number.isFinite(Number(req.body.ordem))
+        ? Number(req.body.ordem)
+        : Number(maxOrdem) + 1;
+
+    try {
+      const [row] = await db
+        .insert(categorias)
+        .values({
+          nome,
+          ordem,
+          ativo: req.body?.ativo !== false,
+        })
+        .returning();
+      res.status(201).json(row);
+    } catch (e: any) {
+      if (String(e?.message ?? "").includes("idx_categorias_nome_lower")) {
+        return res.status(409).json({ message: "Já existe uma categoria com esse nome" });
+      }
+      throw e;
+    }
+  });
+
+  app.patch("/api/categorias/:id", authorize("admin", "gestor"), async (req, res) => {
+    const body = req.body ?? {};
+    const [atual] = await db.select().from(categorias).where(eq(categorias.id, req.params.id)).limit(1);
+    if (!atual) return res.status(404).json({ message: "Não encontrado" });
+
+    const patch: Partial<typeof categorias.$inferInsert> = {};
+    if (body.nome != null) {
+      const nome = String(body.nome).trim();
+      if (!nome) return res.status(400).json({ message: "nome inválido" });
+      const [dup] = await db
+        .select({ id: categorias.id })
+        .from(categorias)
+        .where(and(sql`lower(${categorias.nome}) = lower(${nome})`, ne(categorias.id, atual.id)))
+        .limit(1);
+      if (dup) return res.status(409).json({ message: "Já existe uma categoria com esse nome" });
+      patch.nome = nome;
+    }
+    if (body.ordem != null) patch.ordem = Number(body.ordem) || 0;
+    if (body.ativo !== undefined) patch.ativo = !!body.ativo;
+
+    try {
+      const [row] = await db
+        .update(categorias)
+        .set(patch)
+        .where(eq(categorias.id, req.params.id))
+        .returning();
+      if (patch.nome && patch.nome !== atual.nome) {
+        await db
+          .update(contasPagar)
+          .set({ categoria: patch.nome })
+          .where(eq(contasPagar.categoria, atual.nome));
+        await db
+          .update(custosFixos)
+          .set({ categoria: patch.nome })
+          .where(eq(custosFixos.categoria, atual.nome));
+      }
+      res.json(row);
+    } catch (e: any) {
+      if (String(e?.message ?? "").includes("idx_categorias_nome_lower")) {
+        return res.status(409).json({ message: "Já existe uma categoria com esse nome" });
+      }
+      throw e;
+    }
+  });
+
+  app.delete("/api/categorias/:id", authorize("admin", "gestor"), async (req, res) => {
+    const [atual] = await db.select().from(categorias).where(eq(categorias.id, req.params.id)).limit(1);
+    if (!atual) return res.status(404).json({ message: "Não encontrado" });
+
+    const [{ nPagar }] = await db
+      .select({ nPagar: sql<number>`count(*)::int` })
+      .from(contasPagar)
+      .where(eq(contasPagar.categoria, atual.nome));
+    const [{ nFixos }] = await db
+      .select({ nFixos: sql<number>`count(*)::int` })
+      .from(custosFixos)
+      .where(eq(custosFixos.categoria, atual.nome));
+    const emUso = Number(nPagar) > 0 || Number(nFixos) > 0;
+
+    if (emUso) {
+      const [row] = await db
+        .update(categorias)
+        .set({ ativo: false })
+        .where(eq(categorias.id, atual.id))
+        .returning();
+      return res.json({ ok: true, softDeleted: true, categoria: row });
+    }
+
+    await db.delete(categorias).where(eq(categorias.id, atual.id));
+    res.json({ ok: true, softDeleted: false });
   });
 
   // ── Custos fixos ──────────────────────────────────────────────────────

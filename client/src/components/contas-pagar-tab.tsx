@@ -6,21 +6,9 @@ import { api } from "@/lib/api";
 import { useMoney } from "@/lib/hide-values";
 import { formatDateBR } from "@/lib/formatters";
 import { hojeBrasil } from "@/lib/date";
+import { nomesCategorias, useCategorias } from "@/lib/use-categorias";
+import GerenciarCategoriasModal from "@/components/gerenciar-categorias-modal";
 
-const CATEGORIAS_PAGAR = [
-  "Aluguel",
-  "Energia",
-  "Água",
-  "Internet",
-  "Insumos",
-  "Roupas/Lençóis",
-  "Marketing",
-  "Contabilidade",
-  "DAS",
-  "Pessoal",
-  "Pró-labore",
-  "Outros",
-] as const;
 
 type FiltroAba = "aberto" | "pagas";
 
@@ -29,7 +17,8 @@ const emptyForm = () => ({
   valor: "",
   dataVencimento: hojeBrasil(),
   categoria: "Outros",
-  recorrencia: "" as "" | "mensal",
+  recorrencia: "" as "" | "mensal" | "parcelado",
+  totalParcelas: "2",
   observacoes: "",
 });
 
@@ -38,11 +27,14 @@ export default function ContasPagarTab() {
   const qc = useQueryClient();
   const [aba, setAba] = useState<FiltroAba>("aberto");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [gerenciarCats, setGerenciarCats] = useState(false);
   const q = useQuery({
     queryKey: ["contas-pagar"],
     queryFn: () => api.get<any[]>("/api/contas-pagar"),
   });
+  const catsQ = useCategorias();
   const [form, setForm] = useState(emptyForm);
+  const categoriasOpts = nomesCategorias(catsQ.data, form.categoria);
 
   const rows = q.data ?? [];
   const abertas = useMemo(
@@ -69,7 +61,8 @@ export default function ContasPagarTab() {
       valor: String(r.valor ?? ""),
       dataVencimento: r.dataVencimento ?? hojeBrasil(),
       categoria: r.categoria || "Outros",
-      recorrencia: r.recorrencia === "mensal" ? "mensal" : "",
+      recorrencia: r.recorrencia === "mensal" ? "mensal" : r.totalParcelas ? "parcelado" : "",
+      totalParcelas: String(r.totalParcelas || 2),
       observacoes: r.observacoes ?? "",
     });
     setAba(r.status === "pago" ? "pagas" : "aberto");
@@ -78,19 +71,26 @@ export default function ContasPagarTab() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const body = {
+      const body: Record<string, unknown> = {
         descricao: form.descricao,
         valor: Number(form.valor),
         dataVencimento: form.dataVencimento,
         categoria: form.categoria,
-        recorrencia: form.recorrencia || null,
+        recorrencia: form.recorrencia === "mensal" ? "mensal" : null,
         observacoes: form.observacoes || null,
       };
+      if (!editingId && form.recorrencia === "parcelado") {
+        body.totalParcelas = Math.min(60, Math.max(2, Number(form.totalParcelas) || 2));
+      }
       if (editingId) return api.patch(`/api/contas-pagar/${editingId}`, body);
       return api.post("/api/contas-pagar", body);
     },
-    onSuccess: () => {
-      toast.success(editingId ? "Conta atualizada" : "Conta criada");
+    onSuccess: (res: any) => {
+      if (!editingId && res?.count > 1) {
+        toast.success(`${res.count} parcelas criadas`);
+      } else {
+        toast.success(editingId ? "Conta atualizada" : "Conta criada");
+      }
       resetForm();
       if (!editingId) setAba("aberto");
       refresh();
@@ -161,15 +161,24 @@ export default function ContasPagarTab() {
           <h3 className="text-sm text-[var(--text)]">
             {editingId ? "Editar conta a pagar" : "Nova conta a pagar"}
           </h3>
-          {editingId && (
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
-              onClick={resetForm}
+              className="text-xs text-[var(--accent)] hover:underline"
+              onClick={() => setGerenciarCats(true)}
             >
-              Cancelar edição
+              Gerenciar categorias
             </button>
-          )}
+            {editingId && (
+              <button
+                type="button"
+                className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+                onClick={resetForm}
+              >
+                Cancelar edição
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2 items-end">
           <div className="min-w-[12rem] flex-1">
@@ -210,7 +219,7 @@ export default function ContasPagarTab() {
               value={form.categoria}
               onChange={(e) => setForm({ ...form, categoria: e.target.value })}
             >
-              {CATEGORIAS_PAGAR.map((c) => (
+              {categoriasOpts.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -222,12 +231,32 @@ export default function ContasPagarTab() {
             <select
               className="block mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
               value={form.recorrencia}
-              onChange={(e) => setForm({ ...form, recorrencia: e.target.value as "" | "mensal" })}
+              onChange={(e) =>
+                setForm({ ...form, recorrencia: e.target.value as "" | "mensal" | "parcelado" })
+              }
+              disabled={!!editingId && form.recorrencia === "parcelado"}
             >
               <option value="">Única vez</option>
               <option value="mensal">Todo mês</option>
+              {(!editingId || form.recorrencia === "parcelado") && (
+                <option value="parcelado">Parcelado</option>
+              )}
             </select>
           </div>
+          {form.recorrencia === "parcelado" && !editingId && (
+            <div>
+              <label className="text-xs text-[var(--text-muted)]">Nº de parcelas</label>
+              <input
+                type="number"
+                min={2}
+                max={60}
+                required
+                className="block mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-24"
+                value={form.totalParcelas}
+                onChange={(e) => setForm({ ...form, totalParcelas: e.target.value })}
+              />
+            </div>
+          )}
           <button
             type="submit"
             disabled={save.isPending}
@@ -240,6 +269,12 @@ export default function ContasPagarTab() {
           <p className="text-xs text-[var(--text-muted)]">
             Mensal: ao marcar como paga, o sistema cria automaticamente a próxima parcela no mês
             seguinte (ex.: aluguel).
+          </p>
+        )}
+        {form.recorrencia === "parcelado" && !editingId && (
+          <p className="text-xs text-[var(--text-muted)]">
+            Parcelado: cria {Math.min(60, Math.max(2, Number(form.totalParcelas) || 2))} contas com o
+            mesmo valor, vencendo a cada mês a partir da data informada (ex.: 1/12, 2/12…).
           </p>
         )}
         <div>
@@ -320,6 +355,11 @@ export default function ContasPagarTab() {
                       mensal
                     </span>
                   )}
+                  {r.totalParcelas != null && r.parcelaAtual != null && (
+                    <span className="ml-2 text-xs tabular-nums px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)]">
+                      {r.parcelaAtual}/{r.totalParcelas}
+                    </span>
+                  )}
                 </td>
                 <td>{r.categoria}</td>
                 <td>{formatDateBR(r.dataVencimento)}</td>
@@ -368,25 +408,26 @@ export default function ContasPagarTab() {
                         >
                           Marcar como paga
                         </button>
-                        {r.recorrencia !== "mensal" ? (
-                          <button
-                            type="button"
-                            className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
-                            title="Ao marcar como paga, cria a próxima parcela no mês seguinte"
-                            onClick={() => tornarMensal(r)}
-                          >
-                            Repetir todo mês
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
-                            title="Não gera mais parcelas automaticamente"
-                            onClick={() => removerMensal(r)}
-                          >
-                            Parar repetição
-                          </button>
-                        )}
+                        {r.totalParcelas == null &&
+                          (r.recorrencia !== "mensal" ? (
+                            <button
+                              type="button"
+                              className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+                              title="Ao marcar como paga, cria a próxima parcela no mês seguinte"
+                              onClick={() => tornarMensal(r)}
+                            >
+                              Repetir todo mês
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+                              title="Não gera mais parcelas automaticamente"
+                              onClick={() => removerMensal(r)}
+                            >
+                              Parar repetição
+                            </button>
+                          ))}
                       </>
                     )}
                     <button
@@ -405,6 +446,8 @@ export default function ContasPagarTab() {
           </tbody>
         </table>
       </div>
+
+      {gerenciarCats && <GerenciarCategoriasModal onClose={() => setGerenciarCats(false)} />}
     </div>
   );
 }

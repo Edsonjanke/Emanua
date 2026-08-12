@@ -91,6 +91,10 @@ export const contasPagar = pgTable(
     /** Chave estável da planilha — evita duplicar no reimport. */
     importDedupKey: text("import_dedup_key"),
     recorrencia: text("recorrencia").$type<"mensal" | null>(),
+    /** Parcela atual (1-based) quando for compra parcelada. */
+    parcelaAtual: integer("parcela_atual"),
+    /** Total de parcelas do parcelamento. */
+    totalParcelas: integer("total_parcelas"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [
@@ -206,6 +210,26 @@ export const insertProLaboreRegraSchema = createInsertSchema(proLaboreRegras).om
 export type InsertProLaboreRegra = z.infer<typeof insertProLaboreRegraSchema>;
 export type ProLaboreRegra = typeof proLaboreRegras.$inferSelect;
 
+/** Categorias financeiras compartilhadas (contas a pagar, custos fixos, fluxo). */
+export const categorias = pgTable(
+  "categorias",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    nome: text("nome").notNull(),
+    ativo: boolean("ativo").notNull().default(true),
+    ordem: integer("ordem").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("idx_categorias_nome_lower").using("btree", sql`lower(${t.nome})`)],
+);
+export const insertCategoriaSchema = createInsertSchema(categorias).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCategoria = z.infer<typeof insertCategoriaSchema>;
+export type Categoria = typeof categorias.$inferSelect;
+
+/** Seed / fallback — lista padrão histórica do app. */
 export const CATEGORIAS_PAGAR = [
   "Aluguel",
   "Energia",

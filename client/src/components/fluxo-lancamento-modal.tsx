@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { hojeBrasil } from "@/lib/date";
+import { nomesCategorias, useCategorias } from "@/lib/use-categorias";
 
 export type LancamentoTipo = "receita" | "pagar" | "receber";
 
@@ -20,21 +21,6 @@ export interface LancamentoEdit {
   recorrencia?: "mensal" | null;
   status?: string;
 }
-
-const CATEGORIAS = [
-  "Aluguel",
-  "Energia",
-  "Água",
-  "Internet",
-  "Insumos",
-  "Roupas/Lençóis",
-  "Marketing",
-  "Contabilidade",
-  "DAS",
-  "Pessoal",
-  "Pró-labore",
-  "Outros",
-];
 
 const TITLES: Record<LancamentoTipo, string> = {
   receita: "Receita do dia",
@@ -60,10 +46,13 @@ export default function FluxoLancamentoModal({
   const [descricao, setDescricao] = useState(initial.descricao || "");
   const [clienteNome, setClienteNome] = useState(initial.clienteNome || "");
   const [categoria, setCategoria] = useState(initial.categoria || "Outros");
-  const [recorrencia, setRecorrencia] = useState<"" | "mensal">(
+  const [recorrencia, setRecorrencia] = useState<"" | "mensal" | "parcelado">(
     initial.recorrencia === "mensal" ? "mensal" : "",
   );
+  const [totalParcelas, setTotalParcelas] = useState("2");
   const [busy, setBusy] = useState(false);
+  const catsQ = useCategorias();
+  const categoriasOpts = nomesCategorias(catsQ.data, categoria);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -80,17 +69,26 @@ export default function FluxoLancamentoModal({
         else await api.post("/api/receitas-dia", body);
         toast.success(editing ? "Receita atualizada" : "Receita lançada");
       } else if (tipo === "pagar") {
-        const body = {
+        const body: Record<string, unknown> = {
           descricao,
           valor: Number(valor),
           dataVencimento: data,
           categoria,
           observacoes: observacao || null,
-          recorrencia: recorrencia || null,
+          recorrencia: recorrencia === "mensal" ? "mensal" : null,
         };
-        if (editing) await api.patch(`/api/contas-pagar/${initial.id}`, body);
-        else await api.post("/api/contas-pagar", body);
-        toast.success(editing ? "Despesa atualizada" : "Despesa criada");
+        if (!editing && recorrencia === "parcelado") {
+          body.totalParcelas = Math.min(60, Math.max(2, Number(totalParcelas) || 2));
+        }
+        if (editing) {
+          await api.patch(`/api/contas-pagar/${initial.id}`, body);
+          toast.success("Despesa atualizada");
+        } else {
+          const res = await api.post<{ count?: number }>("/api/contas-pagar", body);
+          toast.success(
+            res?.count && res.count > 1 ? `${res.count} parcelas criadas` : "Despesa criada",
+          );
+        }
       } else {
         const body = {
           clienteNome,
@@ -191,7 +189,7 @@ export default function FluxoLancamentoModal({
               value={categoria}
               onChange={(e) => setCategoria(e.target.value)}
             >
-              {CATEGORIAS.map((c) => (
+              {categoriasOpts.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -201,11 +199,30 @@ export default function FluxoLancamentoModal({
             <select
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
               value={recorrencia}
-              onChange={(e) => setRecorrencia(e.target.value as any)}
+              onChange={(e) => setRecorrencia(e.target.value as "" | "mensal" | "parcelado")}
             >
               <option value="">Única vez</option>
               <option value="mensal">Todo mês</option>
+              {!editing && <option value="parcelado">Parcelado</option>}
             </select>
+            {recorrencia === "parcelado" && !editing && (
+              <>
+                <label className="block text-xs text-[var(--text-muted)]">Nº de parcelas</label>
+                <input
+                  type="number"
+                  min={2}
+                  max={60}
+                  required
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+                  value={totalParcelas}
+                  onChange={(e) => setTotalParcelas(e.target.value)}
+                />
+                <p className="text-xs text-[var(--text-muted)]">
+                  Cria {Math.min(60, Math.max(2, Number(totalParcelas) || 2))} contas com o mesmo
+                  valor, vencendo a cada mês a partir da data informada.
+                </p>
+              </>
+            )}
           </>
         )}
 

@@ -4,12 +4,14 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useMoney } from "@/lib/hide-values";
 import { hojeBrasil } from "@/lib/date";
+import { nomesCategorias, useCategorias } from "@/lib/use-categorias";
 
 export default function MetasTab() {
   const { format } = useMoney();
   const qc = useQueryClient();
   const metas = useQuery({ queryKey: ["metas"], queryFn: () => api.get<any>("/api/metas") });
   const fixos = useQuery({ queryKey: ["custos-fixos"], queryFn: () => api.get<any[]>("/api/custos-fixos") });
+  const catsQ = useCategorias();
 
   const [metaFat, setMetaFat] = useState("");
   const [margem, setMargem] = useState("");
@@ -19,6 +21,7 @@ export default function MetasTab() {
     valorMensal: "",
     dataInicio: hojeBrasil(),
   });
+  const categoriasOpts = nomesCategorias(catsQ.data, novo.categoria);
 
   const saveMeta = useMutation({
     mutationFn: () =>
@@ -144,12 +147,17 @@ export default function MetasTab() {
             value={novo.descricao}
             onChange={(e) => setNovo({ ...novo, descricao: e.target.value })}
           />
-          <input
-            placeholder="Categoria"
-            className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-36"
+          <select
+            className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-40"
             value={novo.categoria}
             onChange={(e) => setNovo({ ...novo, categoria: e.target.value })}
-          />
+          >
+            {categoriasOpts.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
           <input
             type="number"
             placeholder="Valor"
