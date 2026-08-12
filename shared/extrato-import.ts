@@ -33,6 +33,11 @@ export interface ExtratoParseResult {
   ignoradasNaoRealizadas?: number;
   /** Titular / nome sugerido para a conta. */
   titular?: string | null;
+  /**
+   * Saldo do arquivo (fechamento / BALAMT) para âncora automática.
+   * Usar data = último dia do extrato e valor = saldo final (movimentos na data da âncora não somam de novo).
+   */
+  saldoExtrato?: { data: string | null; valor: number } | null;
 }
 
 export function normalizeHistorico(s: string): string {
@@ -270,6 +275,9 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
   let titular: string | null = null;
   let iCols: ReturnType<typeof mapContaTitularesCols> | null = null;
   const contagem = new Map<string, number>();
+  /** Saldos lidos do arquivo (último ganha = fechamento). */
+  let saldoArquivo: number | null = null;
+  let dataExtrato: string | null = null;
 
   for (let n = 0; n < linhas.length; n++) {
     const raw = linhas[n];
@@ -287,7 +295,22 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
       if (!titular) titular = campos[0].trim();
       continue;
     }
-    if (key0 === "saldo" || key0 === "data do extrato") continue;
+    if (key0 === "saldo") {
+      const v = parseBrNumber(campos[1] ?? "");
+      if (v != null) saldoArquivo = v;
+      continue;
+    }
+    if (key0 === "data do extrato") {
+      const d = parseBrDate(campos[1] ?? "");
+      if (d) dataExtrato = d;
+      // "Data do Extrato;…;Saldo;1342,9"
+      const iSaldo = campos.findIndex((c) => normHeaderCell(c) === "saldo");
+      if (iSaldo >= 0) {
+        const v = parseBrNumber(campos[iSaldo + 1] ?? "");
+        if (v != null) saldoArquivo = v;
+      }
+      continue;
+    }
 
     if (isContaTitularesHeaderRow(campos)) {
       iCols = mapContaTitularesCols(campos.map(normHeaderCell));
@@ -338,12 +361,19 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
     };
   }
 
+  const lastRowDate = rows.reduce<string | null>((max, r) => (!max || r.data > max ? r.data : max), null);
+  const saldoExtrato =
+    saldoArquivo != null
+      ? { data: dataExtrato || lastRowDate, valor: saldoArquivo }
+      : null;
+
   return {
     header: { agencia: "banco", conta: contaNum },
     rows,
     erros,
     formato: "conta-titulares",
     titular,
+    saldoExtrato,
   };
 }
 
@@ -441,12 +471,19 @@ export function parseExtratoOfx(texto: string): ExtratoParseResult {
     };
   }
 
+  const balAmt = parseBrNumber(ofxTag(limpo, "BALAMT") || "");
+  const dtEnd = parseOfxDate(ofxTag(limpo, "DTEND"));
+  const lastRowDate = rows.reduce<string | null>((max, r) => (!max || r.data > max ? r.data : max), null);
+  const saldoExtrato =
+    balAmt != null ? { data: dtEnd || lastRowDate, valor: balAmt } : null;
+
   return {
     header: { agencia: "banco", conta: acct },
     rows,
     erros,
     formato: "ofx",
     titular,
+    saldoExtrato,
   };
 }
 

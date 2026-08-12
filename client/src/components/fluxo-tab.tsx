@@ -71,6 +71,7 @@ export default function FluxoTab() {
         formato?: string;
         ignoradasNaoRealizadas?: number;
         titular?: string | null;
+        saldoExtrato?: { data: string | null; valor: number } | null;
       }>("/api/extrato/parse-csv", file);
       if (!parsed.header) {
         throw new Error(
@@ -85,6 +86,12 @@ export default function FluxoTab() {
               ? `Conta ${parsed.header.conta} · ${parsed.titular.slice(0, 40)}`
               : `Conta ${parsed.header.conta}`
             : `Conta ${parsed.header.agencia}/${parsed.header.conta}`;
+      const ancoraData = saldoInicial.data || parsed.saldoExtrato?.data || undefined;
+      const ancoraValor = saldoInicial.valor
+        ? Number(saldoInicial.valor)
+        : parsed.saldoExtrato?.valor != null
+          ? parsed.saldoExtrato.valor
+          : undefined;
       const r = await api.post<{
         inseridas: number;
         total: number;
@@ -96,8 +103,8 @@ export default function FluxoTab() {
         nome: nomeConta,
         rows: parsed.rows,
         formato: parsed.formato,
-        saldoInicialData: saldoInicial.data || undefined,
-        saldoInicialValor: saldoInicial.valor ? Number(saldoInicial.valor) : undefined,
+        saldoInicialData: ancoraData,
+        saldoInicialValor: ancoraValor,
         ativar: true,
       });
       return {
@@ -105,12 +112,14 @@ export default function FluxoTab() {
         formato: parsed.formato,
         ignoradasNaoRealizadas: parsed.ignoradasNaoRealizadas ?? 0,
         rowsLidas: parsed.rows.length,
+        saldoAplicado: ancoraValor ?? null,
       };
     },
     onSuccess: (r: any) => {
       const parts = [`Extrato +${r.inseridas}`];
       if (r.receitasInseridas) parts.push(`receitas +${r.receitasInseridas}`);
       if (r.despesasInseridas) parts.push(`despesas +${r.despesasInseridas}`);
+      if (r.saldoAplicado != null) parts.push(`saldo ${format(r.saldoAplicado)}`);
       const extra =
         r.formato === "gendo-transacoes" && r.ignoradasNaoRealizadas
           ? ` · ${r.ignoradasNaoRealizadas} não realizadas ignoradas`

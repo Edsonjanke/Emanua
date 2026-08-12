@@ -100,6 +100,7 @@ ID;Titulo;Valor;Tipo;Data;Documento;Protocolo;TipoComprovante;TipoTransacao;Comp
       forma: "cartao",
     });
     expect(r.rows[2]).toMatchObject({ tipo: "C", valor: 150, documento: "3365359364" });
+    expect(r.saldoExtrato).toEqual({ data: "2026-08-11", valor: 1342.9 });
     expect(parseExtratoArquivo(csv, "extrato.csv").formato).toBe("conta-titulares");
   });
 
@@ -188,6 +189,7 @@ NEWFILEUID:NONE
       forma: "cartao",
     });
     expect(r.rows[2]).toMatchObject({ tipo: "C", valor: 150, documento: "3365359364" });
+    expect(r.saldoExtrato).toEqual({ data: "2026-08-11", valor: 1342.9 });
     expect(parseExtratoArquivo(ofx, "extrato.ofx").formato).toBe("ofx");
     expect(parseExtratoCsv(ofx).formato).toBe("ofx");
   });
