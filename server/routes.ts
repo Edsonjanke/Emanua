@@ -16,7 +16,7 @@ import {
   proLaboreRegras,
   CATEGORIAS_PAGAR,
 } from "@shared/schema";
-import { parseExtratoCsv } from "@shared/extrato-import";
+import { parseExtratoArquivo } from "@shared/extrato-import";
 import { parseGendoContasPagarCsv } from "@shared/contas-pagar-import";
 import { sugerirConciliacao } from "@shared/extrato-conciliacao";
 import { resolveDebitoNatureza } from "@shared/prolabore";
@@ -96,10 +96,21 @@ export async function registerRoutes(app: Express) {
   app.post("/api/extrato/parse-csv", authorize("admin", "gestor"), extratoUpload.single("file"), async (req: any, res) => {
     try {
       const texto = req.file?.buffer?.toString("utf-8") ?? "";
-      const parsed = parseExtratoCsv(texto);
+      const parsed = parseExtratoArquivo(texto, req.file?.originalname);
       res.json(parsed);
     } catch (e: any) {
-      res.status(400).json({ message: e.message || "Falha ao parsear CSV" });
+      res.status(400).json({ message: e.message || "Falha ao parsear extrato" });
+    }
+  });
+
+  // Alias explícito (CSV ou OFX)
+  app.post("/api/extrato/parse", authorize("admin", "gestor"), extratoUpload.single("file"), async (req: any, res) => {
+    try {
+      const texto = req.file?.buffer?.toString("utf-8") ?? "";
+      const parsed = parseExtratoArquivo(texto, req.file?.originalname);
+      res.json(parsed);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message || "Falha ao parsear extrato" });
     }
   });
 

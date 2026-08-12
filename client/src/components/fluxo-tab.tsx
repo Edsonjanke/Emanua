@@ -70,8 +70,21 @@ export default function FluxoTab() {
         erros: string[];
         formato?: string;
         ignoradasNaoRealizadas?: number;
+        titular?: string | null;
       }>("/api/extrato/parse-csv", file);
-      if (!parsed.header) throw new Error("CSV sem header de agência/conta (ou formato não reconhecido)");
+      if (!parsed.header) {
+        throw new Error(
+          parsed.erros?.[0] || "Extrato sem conta (CSV/OFX não reconhecido)",
+        );
+      }
+      const nomeConta =
+        parsed.formato === "gendo-transacoes"
+          ? "Gendo — Transações"
+          : parsed.formato === "ofx" || parsed.formato === "conta-titulares"
+            ? parsed.titular
+              ? `Conta ${parsed.header.conta} · ${parsed.titular.slice(0, 40)}`
+              : `Conta ${parsed.header.conta}`
+            : `Conta ${parsed.header.agencia}/${parsed.header.conta}`;
       const r = await api.post<{
         inseridas: number;
         total: number;
@@ -80,17 +93,19 @@ export default function FluxoTab() {
       }>("/api/extrato/import", {
         agencia: parsed.header.agencia,
         conta: parsed.header.conta,
-        nome:
-          parsed.formato === "gendo-transacoes"
-            ? "Gendo — Transações"
-            : `Conta ${parsed.header.agencia}/${parsed.header.conta}`,
+        nome: nomeConta,
         rows: parsed.rows,
         formato: parsed.formato,
         saldoInicialData: saldoInicial.data || undefined,
         saldoInicialValor: saldoInicial.valor ? Number(saldoInicial.valor) : undefined,
         ativar: true,
       });
-      return { ...r, formato: parsed.formato, ignoradasNaoRealizadas: parsed.ignoradasNaoRealizadas ?? 0 };
+      return {
+        ...r,
+        formato: parsed.formato,
+        ignoradasNaoRealizadas: parsed.ignoradasNaoRealizadas ?? 0,
+        rowsLidas: parsed.rows.length,
+      };
     },
     onSuccess: (r: any) => {
       const parts = [`Extrato +${r.inseridas}`];
@@ -476,10 +491,10 @@ export default function FluxoTab() {
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={importMut.isPending}
-              title="Importa o extrato do Gendo (transacoes.csv)"
+              title="CSV/OFX do banco ou Gendo transacoes.csv"
               className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
             >
-              {importMut.isPending ? "Importando extrato…" : "Importar extrato (CSV)"}
+              {importMut.isPending ? "Importando extrato…" : "Importar extrato"}
             </button>
             <button
               type="button"
@@ -525,7 +540,7 @@ export default function FluxoTab() {
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,.ofx,text/csv,application/x-ofx,application/ofx"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -574,8 +589,8 @@ export default function FluxoTab() {
           </div>
         </div>
         <p className="text-xs text-[var(--text-muted)] leading-snug">
-          Extrato: arquivo <em>transacoes.csv</em> do Gendo · Contas a pagar:{" "}
-          <em>transacoes_contas.csv</em>
+          Extrato: OFX · Conta/Titulares CSV · Viacredi CSV · Gendo <em>transacoes.csv</em> · Contas
+          a pagar: <em>transacoes_contas.csv</em>
         </p>
       </section>
 

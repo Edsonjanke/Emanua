@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseExtratoCsv, buildDedupKey } from "@shared/extrato-import";
+import {
+  parseExtratoArquivo,
+  parseExtratoCsv,
+  parseContaTitularesCsv,
+  parseExtratoOfx,
+  buildDedupKey,
+} from "@shared/extrato-import";
 import { sugerirConciliacao } from "@shared/extrato-conciliacao";
 import { classifyProLabore, resolveDebitoNatureza } from "@shared/prolabore";
 import {
@@ -55,6 +61,135 @@ describe("extrato-import", () => {
     expect(r.rows[1]).toMatchObject({ tipo: "D", valor: 100, syncDespesa: true });
     expect(r.rows[2].valor).toBe(4.88);
     expect(r.rows[2].syncDespesa).toBe(true);
+  });
+
+  it("parseia Conta/Titulares CSV (ignora SALDO ANTERIOR; ID vazio usa Documento)", () => {
+    const csv = `Conta;21865663
+Titulares;
+63 027 712 ISMALDA JANKE (**.***.712/0001-**)
+Saldo;1342,9;Limite;0
+
+Data do Extrato;11/08/2026 00:00:00;Saldo;1322,37
+ID;Titulo;Valor;Tipo;Data;Documento;Protocolo;TipoComprovante;TipoTransacao;ComprovantePix;DataTransacao
+0;SALDO ANTERIOR;1322,37;Todos;11/08/2026 00:00:00;;;0;0;False;2026-08-11 00:00:00
+
+Data do Extrato;11/08/2026 00:00:00;Saldo;1342,9
+ID;Titulo;Valor;Tipo;Data;Documento;Protocolo;TipoComprovante;TipoTransacao;ComprovantePix;DataTransacao
+3364386879;DEBITO PIX - CHARLES KESKE;110;Debito;11/08/2026 00:00:00;882502.945;2411.3354.2410.0B08.1A22.025D.0A;1;34;True;2026-08-11 09:27:13
+;CARTAO DEBITO - REDE TOP LONTRAS;19,47;Debito;11/08/2026 00:00:00;00811183726;;1;0;False;2026-08-11 15:37:27
+3365359364;CREDITO PIX - PAISAGISMO NASATO LTDA;150;Credito;11/08/2026 00:00:00;883033.697;;2;34;True;2026-08-11 21:54:25
+`;
+    const r = parseContaTitularesCsv(csv);
+    expect(r.formato).toBe("conta-titulares");
+    expect(r.header).toEqual({ agencia: "banco", conta: "21865663" });
+    expect(r.titular).toMatch(/ISMALDA JANKE/);
+    expect(r.rows).toHaveLength(3);
+    expect(r.rows.find((x) => x.historico.includes("SALDO"))).toBeUndefined();
+    expect(r.rows[0]).toMatchObject({
+      data: "2026-08-11",
+      tipo: "D",
+      valor: 110,
+      documento: "3364386879",
+      forma: "pix",
+    });
+    expect(r.rows[1]).toMatchObject({
+      historico: "CARTAO DEBITO - REDE TOP LONTRAS",
+      documento: "00811183726",
+      valor: 19.47,
+      tipo: "D",
+      forma: "cartao",
+    });
+    expect(r.rows[2]).toMatchObject({ tipo: "C", valor: 150, documento: "3365359364" });
+    expect(parseExtratoArquivo(csv, "extrato.csv").formato).toBe("conta-titulares");
+  });
+
+  it("parseia OFX SGML (ignora SALDO ANTERIOR; FITID vazio ainda importa)", () => {
+    const ofx = `OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+SECURITY:NONE
+ENCODING:USASCII
+CHARSET:1252
+COMPRESSION:NONE
+OLDFILEUID:NONE
+NEWFILEUID:NONE
+
+<OFX>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<STMTRS>
+<BANKACCTFROM>
+<ACCTID>21865663</ACCTID>
+</BANKACCTFROM>
+<BANKINFO>
+<HOLDER>63 027 712 ISMALDA JANKE (**.***.712/0001-**)</HOLDER>
+<BALAMT>1342,9</BALAMT>
+<CREDITLIMIT>0</CREDITLIMIT>
+</BANKINFO>
+<BANKTRANLIST>
+<DTSTART>20260811</DTSTART>
+<DTEND>20260811</DTEND>
+<STMTTRN>
+<TRNTYPE>CREDIT</TRNTYPE>
+<DTPOSTED>20260811000000</DTPOSTED>
+<TRNAMT>1322,37</TRNAMT>
+<FITID>0</FITID>
+<NAME>SALDO ANTERIOR</NAME>
+</STMTTRN>
+</BANKTRANLIST>
+<BANKTRANLIST>
+<DTSTART>20260811</DTSTART>
+<DTEND>20260811</DTEND>
+<STMTTRN>
+<TRNTYPE>DEBIT</TRNTYPE>
+<DTPOSTED>20260811092713</DTPOSTED>
+<TRNAMT>110</TRNAMT>
+<FITID>3364386879</FITID>
+<NAME>DEBITO PIX - CHARLES KESKE</NAME>
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>DEBIT</TRNTYPE>
+<DTPOSTED>20260811153727</DTPOSTED>
+<TRNAMT>19,47</TRNAMT>
+<FITID></FITID>
+<NAME>CARTAO DEBITO - REDE TOP LONTRAS</NAME>
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>CREDIT</TRNTYPE>
+<DTPOSTED>20260811215425</DTPOSTED>
+<TRNAMT>150</TRNAMT>
+<FITID>3365359364</FITID>
+<NAME>CREDITO PIX - PAISAGISMO NASATO LTDA</NAME>
+</STMTTRN>
+</BANKTRANLIST>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>
+`;
+    const r = parseExtratoOfx(ofx);
+    expect(r.formato).toBe("ofx");
+    expect(r.header).toEqual({ agencia: "banco", conta: "21865663" });
+    expect(r.titular).toMatch(/ISMALDA JANKE/);
+    expect(r.rows).toHaveLength(3);
+    expect(r.rows.find((x) => x.historico.includes("SALDO"))).toBeUndefined();
+    expect(r.rows[0]).toMatchObject({
+      data: "2026-08-11",
+      tipo: "D",
+      valor: 110,
+      documento: "3364386879",
+      forma: "pix",
+    });
+    expect(r.rows[1]).toMatchObject({
+      historico: "CARTAO DEBITO - REDE TOP LONTRAS",
+      documento: null,
+      valor: 19.47,
+      tipo: "D",
+      forma: "cartao",
+    });
+    expect(r.rows[2]).toMatchObject({ tipo: "C", valor: 150, documento: "3365359364" });
+    expect(parseExtratoArquivo(ofx, "extrato.ofx").formato).toBe("ofx");
+    expect(parseExtratoCsv(ofx).formato).toBe("ofx");
   });
 });
 
