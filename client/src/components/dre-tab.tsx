@@ -3,6 +3,38 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useMoney } from "@/lib/hide-values";
 
+interface LinhaDre {
+  label: string;
+  value: number;
+  tone?: string;
+  bold?: boolean;
+}
+
+/**
+ * As linhas "(−) Custos…" já carregam o sinal no próprio rótulo, então elas
+ * mostram o valor absoluto. As linhas de RESULTADO (Margem de contribuição e
+ * Resultado operacional) não têm prefixo — e a versão anterior aplicava
+ * `Math.abs()` nelas também, com um ternário morto que devolvia "" nos três
+ * ramos. Um prejuízo de R$ 1.373,65 aparecia como "R$ 1.373,65" em cor neutra:
+ * o mês fechava no vermelho e o painel lia lucro.
+ */
+function ehResultado(r: LinhaDre): boolean {
+  return !r.tone;
+}
+
+function valorDaLinha(r: LinhaDre, format: (n: number) => string): string {
+  const texto = format(Math.abs(r.value));
+  return ehResultado(r) && r.value < 0 ? `− ${texto}` : texto;
+}
+
+function corDaLinha(r: LinhaDre): string {
+  if (r.tone === "green") return "text-[var(--green)]";
+  if (r.tone === "red") return "text-[var(--red-text)]";
+  if (r.value < 0) return "text-[var(--red-text)]";
+  if (r.value > 0) return "text-[var(--green)]";
+  return "text-[var(--text)]";
+}
+
 export default function DreTab() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -66,18 +98,7 @@ export default function DreTab() {
               className={`flex justify-between text-sm ${r.bold ? "pt-2 border-t border-[var(--border)] font-medium" : ""}`}
             >
               <span className="text-[var(--text-muted)]">{r.label}</span>
-              <span
-                className={
-                  r.tone === "green"
-                    ? "text-[var(--green)]"
-                    : r.tone === "red"
-                      ? "text-[var(--red)]"
-                      : "text-[var(--text)]"
-                }
-              >
-                {format(Math.abs(r.value))}
-                {r.value < 0 ? "" : r.tone === "red" ? "" : ""}
-              </span>
+              <span className={`tabular-nums ${corDaLinha(r)}`}>{valorDaLinha(r, format)}</span>
             </li>
           ))}
         </ul>

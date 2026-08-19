@@ -59,7 +59,7 @@ export default function ProLaboreTab() {
               </span>
               <button
                 type="button"
-                className="text-[var(--red)] text-xs"
+                className="text-[var(--red-text)] text-xs"
                 onClick={() =>
                   api.delete(`/api/pro-labore/regras/${r.id}`).then(() =>
                     qc.invalidateQueries({ queryKey: ["pro-labore"] }),
@@ -132,7 +132,7 @@ export default function ProLaboreTab() {
                 <td className="p-3 space-x-1">
                   <button
                     type="button"
-                    className="text-xs text-[var(--accent)]"
+                    className="text-xs text-[var(--accent-text)]"
                     onClick={() => {
                       const socio = prompt("Pró-labore de qual sócio?", i.socio || "ataize");
                       if (!socio) return;

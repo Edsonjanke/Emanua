@@ -141,7 +141,7 @@ export default function GerenciarCategoriasModal({ onClose }: { onClose: () => v
                     />
                     <button
                       type="submit"
-                      className="text-xs text-[var(--accent)]"
+                      className="text-xs text-[var(--accent-text)]"
                       disabled={salvar.isPending}
                     >
                       Salvar
@@ -176,7 +176,7 @@ export default function GerenciarCategoriasModal({ onClose }: { onClose: () => v
                     {!c.ativo ? (
                       <button
                         type="button"
-                        className="p-1 rounded hover:bg-[var(--bg)] text-[var(--accent)]"
+                        className="p-1 rounded hover:bg-[var(--bg)] text-[var(--accent-text)]"
                         title="Reativar"
                         aria-label="Reativar"
                         onClick={() => reativar(c)}
@@ -186,7 +186,7 @@ export default function GerenciarCategoriasModal({ onClose }: { onClose: () => v
                     ) : (
                       <button
                         type="button"
-                        className="p-1 rounded hover:bg-[var(--bg)] text-[var(--red)]"
+                        className="p-1 rounded hover:bg-[var(--bg)] text-[var(--red-text)]"
                         title="Excluir"
                         aria-label="Excluir"
                         onClick={() => excluir(c)}

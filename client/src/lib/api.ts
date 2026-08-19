@@ -1,8 +1,16 @@
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /**
+   * Corpo da resposta, inteiro. Existe porque nem toda recusa é um erro: o
+   * import devolve 409 com uma PERGUNTA ("este arquivo é de outra conta — o que
+   * você quer fazer?") e nada foi gravado. Sem o corpo, a tela só teria a frase
+   * solta e mostraria uma pergunta como se fosse falha.
+   */
+  data: any;
+  constructor(status: number, message: string, data?: any) {
     super(message);
     this.status = status;
+    this.data = data ?? null;
   }
 }
 
@@ -18,7 +26,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, data?.message || res.statusText);
+  if (!res.ok) throw new ApiError(res.status, data?.message || res.statusText, data);
   return data as T;
 }
 
@@ -36,7 +44,7 @@ export const api = {
     fd.append(field, file);
     const res = await fetch(url, { method: "POST", body: fd, credentials: "include" });
     const data = await res.json();
-    if (!res.ok) throw new ApiError(res.status, data?.message || res.statusText);
+    if (!res.ok) throw new ApiError(res.status, data?.message || res.statusText, data);
     return data as T;
   },
 };

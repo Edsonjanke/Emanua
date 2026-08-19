@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import type { DecisaoContaAtiva } from "@shared/extrato-conta";
 import { useMoney } from "@/lib/hide-values";
 import { formatDateBR } from "@/lib/formatters";
 
@@ -20,6 +21,14 @@ interface ParseResult {
   };
 }
 
+/** A pergunta do 409 — mesmo formato que o import de extrato já usa. */
+interface PerguntaContaDiferente {
+  tipo: "conta-diferente";
+  contaAtiva: { id: string; nome: string; agencia: string; conta: string };
+  contaExtrato: { agencia: string; conta: string; nome: string; existe: boolean };
+  opcoes: { id: DecisaoContaAtiva; rotulo: string }[];
+}
+
 export default function ImportPlanilhaModal({
   onClose,
   onSaved,
@@ -31,6 +40,13 @@ export default function ImportPlanilhaModal({
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * O servidor devolveu 409 porque a conta ativa é outra e ninguém autorizou a
+   * troca. NADA foi gravado — é pergunta, não erro, e por isso não vira toast
+   * vermelho. Antes disto, importar planilha trocava a conta ativa em silêncio
+   * e o painel passava a mostrar o saldo da planilha no lugar do saldo do banco.
+   */
+  const [pergunta, setPergunta] = useState<PerguntaContaDiferente | null>(null);
   const [opts, setOpts] = useState({
     extrato: true,
     receitas: true,
@@ -52,14 +68,23 @@ export default function ImportPlanilhaModal({
     }
   }
 
-  async function importar() {
+  async function importar(decisaoContaAtiva: DecisaoContaAtiva | null = null) {
     if (!parsed?.rows?.length) return;
     setBusy(true);
     try {
       const r = await api.post<any>("/api/planilha/import", {
         rows: parsed.rows,
         ...opts,
+        // Conta ativa: só troca se o usuário tiver dito que quer trocar.
+        decisaoContaAtiva,
       });
+      setPergunta(null);
+      if (r.contaAtivaTrocada) {
+        toast.message(
+          `Conta ativa agora é ${r.contaAtivaAgora}` +
+            (r.contaAtivaAntes ? ` (antes: ${r.contaAtivaAntes})` : ""),
+        );
+      }
       const skipped =
         (r.extratoDuplicados ?? 0) + (r.receitasDuplicadas ?? 0) + (r.despesasDuplicadas ?? 0);
       const novos =
@@ -74,6 +99,11 @@ export default function ImportPlanilhaModal({
       }
       onSaved();
     } catch (e: any) {
+      // Pergunta do servidor: nada foi gravado, e isto não é erro nenhum.
+      if (e instanceof ApiError && e.status === 409 && e.data?.pergunta?.tipo === "conta-diferente") {
+        setPergunta(e.data.pergunta as PerguntaContaDiferente);
+        return;
+      }
       toast.error(e.message);
     } finally {
       setBusy(false);
@@ -191,7 +221,7 @@ export default function ImportPlanilhaModal({
                     <tr key={r.dedupKey} className="border-t border-[var(--border)]">
                       <td className="p-2 whitespace-nowrap">{formatDateBR(r.data)}</td>
                       <td>{r.conta}</td>
-                      <td className={r.tipo === "Entrada" ? "text-[var(--green)]" : "text-[var(--red)]"}>
+                      <td className={r.tipo === "Entrada" ? "text-[var(--green)]" : "text-[var(--red-text)]"}>
                         {r.tipo}
                       </td>
                       <td className="max-w-[220px] truncate">{r.descricao}</td>
@@ -212,14 +242,41 @@ export default function ImportPlanilhaModal({
           </>
         )}
 
+        {pergunta && (
+          <div className="rounded-lg border border-[var(--amber)] bg-[var(--bg-card)] p-4 space-y-3">
+            <p className="text-sm text-[var(--text)]">
+              Esta planilha entra na{" "}
+              <strong className="font-medium">{pergunta.contaExtrato.nome}</strong>, e a sua conta
+              ativa é <strong className="font-medium">{pergunta.contaAtiva.nome}</strong>. O painel
+              calcula o saldo real pela conta ativa.
+            </p>
+            <p className="text-xs text-[var(--text-muted)]">
+              Nada foi gravado ainda. Escolha o que fazer:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {pergunta.opcoes.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => importar(o.id)}
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--bg)] disabled:opacity-50"
+                >
+                  {o.rotulo}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-[var(--text-muted)]">
             Cancelar
           </button>
           <button
             type="button"
-            disabled={busy || !parsed?.rows?.length}
-            onClick={importar}
+            disabled={busy || !parsed?.rows?.length || !!pergunta}
+            onClick={() => importar()}
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-50"
           >
             {busy ? "Importando… aguarde" : "Importar"}
@@ -232,7 +289,7 @@ export default function ImportPlanilhaModal({
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   const color =
-    tone === "green" ? "text-[var(--green)]" : tone === "red" ? "text-[var(--red)]" : "text-[var(--text)]";
+    tone === "green" ? "text-[var(--green)]" : tone === "red" ? "text-[var(--red-text)]" : "text-[var(--text)]";
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3">
       <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{label}</p>

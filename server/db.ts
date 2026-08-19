@@ -29,6 +29,12 @@ export const db = drizzle(pool, { schema });
 export async function ensureSchemaPatches() {
   await db.execute(sql`ALTER TABLE receitas_dia ADD COLUMN IF NOT EXISTS import_dedup_key text`);
   await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS import_dedup_key text`);
+  // Parcelamento/recorrência — contas a pagar e a receber falam a mesma língua.
+  await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS parcela_atual integer`);
+  await db.execute(sql`ALTER TABLE contas_pagar ADD COLUMN IF NOT EXISTS total_parcelas integer`);
+  await db.execute(sql`ALTER TABLE recebiveis ADD COLUMN IF NOT EXISTS recorrencia text`);
+  await db.execute(sql`ALTER TABLE recebiveis ADD COLUMN IF NOT EXISTS parcela_atual integer`);
+  await db.execute(sql`ALTER TABLE recebiveis ADD COLUMN IF NOT EXISTS total_parcelas integer`);
   // Índice único sem predicado: ON CONFLICT (col) exige isso no Postgres.
   // Vários NULL continuam permitidos.
   await db.execute(sql`DROP INDEX IF EXISTS idx_receitas_dia_import_dedup`);

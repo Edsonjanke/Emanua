@@ -94,6 +94,9 @@ async function main() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_recebiveis_status ON recebiveis(status)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_recebiveis_vencimento ON recebiveis(data_vencimento)`);
+  await db.execute(sql`ALTER TABLE recebiveis ADD COLUMN IF NOT EXISTS recorrencia text`);
+  await db.execute(sql`ALTER TABLE recebiveis ADD COLUMN IF NOT EXISTS parcela_atual integer`);
+  await db.execute(sql`ALTER TABLE recebiveis ADD COLUMN IF NOT EXISTS total_parcelas integer`);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS receitas_dia (
