@@ -3,6 +3,7 @@ import { Route, Switch, Redirect } from "wouter";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { MoneyProvider } from "@/lib/hide-values";
+import { ConfirmProvider } from "@/components/ui/confirmar";
 import LoginPage from "@/pages/login";
 import PainelPage from "@/pages/painel";
 
@@ -41,18 +42,20 @@ export default function App() {
     <QueryClientProvider client={qc}>
       <AuthProvider>
         <MoneyProvider>
-          <Switch>
-            <Route path="/login" component={LoginPage} />
-            <Route path="/">
-              <PrivateRoute>
-                <PainelPage />
-              </PrivateRoute>
-            </Route>
-            <Route>
-              <Redirect to="/" />
-            </Route>
-          </Switch>
-          <Toaster theme="light" position="top-right" richColors />
+          <ConfirmProvider>
+            <Switch>
+              <Route path="/login" component={LoginPage} />
+              <Route path="/">
+                <PrivateRoute>
+                  <PainelPage />
+                </PrivateRoute>
+              </Route>
+              <Route>
+                <Redirect to="/" />
+              </Route>
+            </Switch>
+            <Toaster theme="light" position="top-right" richColors />
+          </ConfirmProvider>
         </MoneyProvider>
       </AuthProvider>
     </QueryClientProvider>

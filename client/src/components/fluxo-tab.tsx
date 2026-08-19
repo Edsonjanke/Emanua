@@ -22,6 +22,7 @@ import FluxoLancamentoModal, {
   type LancamentoTipo,
 } from "@/components/fluxo-lancamento-modal";
 import ImportPlanilhaModal from "@/components/import-planilha-modal";
+import ImportExtratoModal from "@/components/import-extrato-modal";
 
 interface FluxoData {
   hoje: string;
@@ -45,13 +46,12 @@ interface FluxoData {
 export default function FluxoTab() {
   const { format } = useMoney();
   const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
   const contasFileRef = useRef<HTMLInputElement>(null);
   const [incluirDas, setIncluirDas] = useState(false);
   const [incluirProLabore, setIncluirProLabore] = useState(true);
   const [modal, setModal] = useState<LancamentoEdit | null>(null);
   const [planilhaOpen, setPlanilhaOpen] = useState(false);
-  const [saldoInicial, setSaldoInicial] = useState({ data: "", valor: "" });
+  const [extratoOpen, setExtratoOpen] = useState(false);
   const [reconcileBusy, setReconcileBusy] = useState(false);
 
   const q = useQuery({
@@ -60,74 +60,6 @@ export default function FluxoTab() {
       api.get<FluxoData>(
         `/api/financeiro/fluxo?incluirDas=${incluirDas ? 1 : 0}&incluirProLabore=${incluirProLabore ? 1 : 0}`,
       ),
-  });
-
-  const importMut = useMutation({
-    mutationFn: async (file: File) => {
-      const parsed = await api.upload<{
-        header: { agencia: string; conta: string } | null;
-        rows: any[];
-        erros: string[];
-        formato?: string;
-        ignoradasNaoRealizadas?: number;
-        titular?: string | null;
-        saldoExtrato?: { data: string | null; valor: number } | null;
-      }>("/api/extrato/parse-csv", file);
-      if (!parsed.header) {
-        throw new Error(
-          parsed.erros?.[0] || "Extrato sem conta (CSV/OFX não reconhecido)",
-        );
-      }
-      const nomeConta =
-        parsed.formato === "gendo-transacoes"
-          ? "Gendo — Transações"
-          : parsed.formato === "ofx" || parsed.formato === "conta-titulares"
-            ? parsed.titular
-              ? `Conta ${parsed.header.conta} · ${parsed.titular.slice(0, 40)}`
-              : `Conta ${parsed.header.conta}`
-            : `Conta ${parsed.header.agencia}/${parsed.header.conta}`;
-      const ancoraData = saldoInicial.data || parsed.saldoExtrato?.data || undefined;
-      const ancoraValor = saldoInicial.valor
-        ? Number(saldoInicial.valor)
-        : parsed.saldoExtrato?.valor != null
-          ? parsed.saldoExtrato.valor
-          : undefined;
-      const r = await api.post<{
-        inseridas: number;
-        total: number;
-        receitasInseridas?: number;
-        despesasInseridas?: number;
-      }>("/api/extrato/import", {
-        agencia: parsed.header.agencia,
-        conta: parsed.header.conta,
-        nome: nomeConta,
-        rows: parsed.rows,
-        formato: parsed.formato,
-        saldoInicialData: ancoraData,
-        saldoInicialValor: ancoraValor,
-        ativar: true,
-      });
-      return {
-        ...r,
-        formato: parsed.formato,
-        ignoradasNaoRealizadas: parsed.ignoradasNaoRealizadas ?? 0,
-        rowsLidas: parsed.rows.length,
-        saldoAplicado: ancoraValor ?? null,
-      };
-    },
-    onSuccess: (r: any) => {
-      const parts = [`Extrato +${r.inseridas}`];
-      if (r.receitasInseridas) parts.push(`receitas +${r.receitasInseridas}`);
-      if (r.despesasInseridas) parts.push(`despesas +${r.despesasInseridas}`);
-      if (r.saldoAplicado != null) parts.push(`saldo ${format(r.saldoAplicado)}`);
-      const extra =
-        r.formato === "gendo-transacoes" && r.ignoradasNaoRealizadas
-          ? ` · ${r.ignoradasNaoRealizadas} não realizadas ignoradas`
-          : "";
-      toast.success(`${parts.join(" · ")}${extra}`);
-      refresh();
-    },
-    onError: (e: any) => toast.error(e.message),
   });
 
   const importContasMut = useMutation({
@@ -192,7 +124,7 @@ export default function FluxoTab() {
   if (q.isLoading) return <p className="text-[var(--text-muted)]">Carregando o fluxo de caixa…</p>;
   if (q.isError) {
     return (
-      <div className="text-[var(--red)]">
+      <div className="text-[var(--red-text)]">
         Não foi possível carregar o fluxo.{" "}
         <button type="button" className="underline" onClick={() => q.refetch()}>
           Tentar de novo
@@ -212,7 +144,7 @@ export default function FluxoTab() {
           <Kpi
             label="Saldo real hoje"
             value={d.saldoRealHoje != null ? format(d.saldoRealHoje) : "Defina o saldo inicial"}
-            note={d.conta?.nome ?? "Use a data e o valor em Importações"}
+            note={d.conta?.nome ?? "Defina a âncora ao importar o extrato"}
             size="lead"
           />
           <Kpi
@@ -249,7 +181,7 @@ export default function FluxoTab() {
           <button
             type="button"
             onClick={() => setModal({ tipo: "pagar" })}
-            className="rounded-lg border border-[var(--red)]/40 bg-[var(--bg-card)] text-[var(--red)] px-4 py-2 text-sm hover:bg-[var(--bg)]"
+            className="rounded-lg border border-[var(--red)]/40 bg-[var(--bg-card)] text-[var(--red-text)] px-4 py-2 text-sm hover:bg-[var(--bg)]"
           >
             + Conta a pagar
           </button>
@@ -279,7 +211,7 @@ export default function FluxoTab() {
                     <span className="text-[var(--text-muted)] font-normal">{formatWeekday(dia.data)}</span>
                   </p>
                   {(dia.isHoje || dia.data === d.hoje) && (
-                    <span className="text-xs uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
+                    <span className="text-xs uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent-text)]">
                       hoje
                     </span>
                   )}
@@ -287,12 +219,12 @@ export default function FluxoTab() {
                     <span className="tabular-nums text-[var(--green)] text-xs">+{format(dia.totalEntradas)}</span>
                   )}
                   {dia.totalSaidas > 0 && (
-                    <span className="tabular-nums text-[var(--red)] text-xs">−{format(dia.totalSaidas)}</span>
+                    <span className="tabular-nums text-[var(--red-text)] text-xs">−{format(dia.totalSaidas)}</span>
                   )}
                   {dia.saldoProjetado != null && (
                     <span
                       className={`ml-auto tabular-nums text-xs ${
-                        dia.saldoProjetado < 0 ? "text-[var(--red)] font-semibold" : "text-[var(--accent)]"
+                        dia.saldoProjetado < 0 ? "text-[var(--red-text)] font-semibold" : "text-[var(--accent-text)]"
                       }`}
                     >
                       {dia.isPassado ? "Saldo" : "Projetado"} {format(dia.saldoProjetado)}
@@ -309,7 +241,13 @@ export default function FluxoTab() {
                           <span className="text-[var(--text-muted)] text-xs ml-1">receita</span>
                         )}
                         {e.tipo === "recebivel" && (
-                          <span className="text-[var(--text-muted)] text-xs ml-1">a receber</span>
+                          <span className="text-[var(--text-muted)] text-xs ml-1">
+                            a receber
+                            {e.totalParcelas != null && e.parcelaAtual != null && (
+                              <span className="tabular-nums"> {e.parcelaAtual}/{e.totalParcelas}</span>
+                            )}
+                            {e.recorrencia === "mensal" && " · mensal"}
+                          </span>
                         )}
                       </span>
                       {e.id && e.tipo && (
@@ -339,7 +277,7 @@ export default function FluxoTab() {
                           </button>
                           <button
                             type="button"
-                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)] text-[var(--red)]"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)] text-[var(--red-text)]"
                             title="Excluir"
                             aria-label="Excluir"
                             onClick={() =>
@@ -354,7 +292,7 @@ export default function FluxoTab() {
                   ))}
                   {dia.saidas?.map((s: any) => (
                     <li key={s.id || `s-${s.descricao}-${s.valor}`} className="flex items-center gap-2 group">
-                      <span className="text-[var(--red)] flex-1 min-w-0">
+                      <span className="text-[var(--red-text)] flex-1 min-w-0">
                         − {format(s.valor)} · {s.descricao}
                         {s.categoria ? ` (${s.categoria})` : ""}
                       </span>
@@ -384,7 +322,7 @@ export default function FluxoTab() {
                           </button>
                           <button
                             type="button"
-                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)] text-[var(--red)]"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded hover:bg-[var(--bg)] text-[var(--red-text)]"
                             title="Excluir"
                             aria-label="Excluir"
                             onClick={() => removeItem("pagar", s.id)}
@@ -400,6 +338,92 @@ export default function FluxoTab() {
             ))}
           </div>
         </div>
+      </section>
+
+      {/*
+        Ferramentas raras: imports / conciliação / âncora.
+        Fica DEPOIS dos lançamentos e ANTES dos gráficos. A regra nomeada do
+        DESIGN.md ("Cash Path First") pede que CSV/import venham depois dos
+        lançamentos — e vêm. Estar no fim absoluto da página era um exagero
+        próprio, não a regra: no celular o botão caía em y=1801, 2,15 telas de
+        rolagem. Análise é análise, não caminho do caixa, então imports passam à
+        frente dela sem promoção nenhuma: continuam uma fileira de botões-fantasma,
+        sem KPI, sem destaque, abaixo de saldo → criações → lançamentos.
+      */}
+      <section className="flex flex-col gap-2" aria-label="Importações e conciliação">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <button
+              type="button"
+              onClick={() => setExtratoOpen(true)}
+              title="CSV/OFX do banco ou Gendo transacoes.csv — com conferência antes de gravar"
+              className="min-h-11 rounded-lg border border-[var(--accent)] bg-[var(--bg-card)] px-4 py-2 text-sm text-[var(--accent-text)] hover:bg-[var(--sage)]/40 sm:min-h-0"
+            >
+              Importar extrato
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlanilhaOpen(true)}
+              title="Planilha XLSX de entradas e saídas"
+              className="min-h-11 rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] sm:min-h-0"
+            >
+              Importar planilha
+            </button>
+            <button
+              type="button"
+              onClick={() => contasFileRef.current?.click()}
+              disabled={importContasMut.isPending}
+              title="Importa contas do Gendo (transacoes_contas.csv)"
+              className="min-h-11 rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50 sm:min-h-0"
+            >
+              {importContasMut.isPending ? "Importando contas…" : "Importar contas a pagar"}
+            </button>
+            <button
+              type="button"
+              title="Associa lançamentos do extrato com receitas e despesas"
+              disabled={reconcileBusy}
+              onClick={async () => {
+                setReconcileBusy(true);
+                try {
+                  const r: any = await api.post("/api/extrato/reconciliar", {});
+                  toast.success(
+                    r.matches
+                      ? `${r.matches} lançamento(ns) conciliado(s) com o extrato`
+                      : "Nenhum lançamento novo para conciliar",
+                  );
+                  refresh();
+                } catch (e: any) {
+                  toast.error(e.message || "Não foi possível conciliar o extrato");
+                } finally {
+                  setReconcileBusy(false);
+                }
+              }}
+              className="min-h-11 rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50 sm:min-h-0"
+            >
+              {reconcileBusy ? "Conciliando…" : "Conciliar extrato"}
+            </button>
+            <input
+              ref={contasFileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importContasMut.mutate(f);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          {d.ultimaDataExtrato && (
+            <span className="text-xs text-[var(--text-muted)]">
+              Último extrato: {formatDateBR(d.ultimaDataExtrato)}
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-[var(--text-muted)] leading-snug">
+          Extrato: OFX · Conta/Titulares CSV · Viacredi CSV · Gendo <em>transacoes.csv</em> · Contas
+          a pagar: <em>transacoes_contas.csv</em>
+        </p>
       </section>
 
       {/* Analysis band */}
@@ -477,7 +501,7 @@ export default function FluxoTab() {
             Meta <strong className="text-[var(--text)] ml-1">{format(m.metaFaturamento)}</strong>
           </span>
           <span>
-            Projeção <strong className="text-[var(--accent)] ml-1">{format(m.projecao)}</strong>
+            Projeção <strong className="text-[var(--accent-text)] ml-1">{format(m.projecao)}</strong>
           </span>
           <span>
             Realizado <strong className="text-[var(--green)] ml-1">{format(m.realizado)}</strong>
@@ -492,116 +516,6 @@ export default function FluxoTab() {
         </div>
       </section>
 
-      {/* Rare tools: imports / reconcile / âncora */}
-      <section className="flex flex-col gap-2" aria-label="Importações e conciliação">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <div className="flex flex-wrap gap-2 items-center">
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={importMut.isPending}
-              title="CSV/OFX do banco ou Gendo transacoes.csv"
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
-            >
-              {importMut.isPending ? "Importando extrato…" : "Importar extrato"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setPlanilhaOpen(true)}
-              title="Planilha XLSX de entradas e saídas"
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)]"
-            >
-              Importar planilha
-            </button>
-            <button
-              type="button"
-              onClick={() => contasFileRef.current?.click()}
-              disabled={importContasMut.isPending}
-              title="Importa contas do Gendo (transacoes_contas.csv)"
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
-            >
-              {importContasMut.isPending ? "Importando contas…" : "Importar contas a pagar"}
-            </button>
-            <button
-              type="button"
-              title="Associa lançamentos do extrato com receitas e despesas"
-              disabled={reconcileBusy}
-              onClick={async () => {
-                setReconcileBusy(true);
-                try {
-                  const r: any = await api.post("/api/extrato/reconciliar", {});
-                  toast.success(
-                    r.matches
-                      ? `${r.matches} lançamento(ns) conciliado(s) com o extrato`
-                      : "Nenhum lançamento novo para conciliar",
-                  );
-                  refresh();
-                } catch (e: any) {
-                  toast.error(e.message || "Não foi possível conciliar o extrato");
-                } finally {
-                  setReconcileBusy(false);
-                }
-              }}
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--bg-card)] disabled:opacity-50"
-            >
-              {reconcileBusy ? "Conciliando…" : "Conciliar extrato"}
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,.ofx,text/csv,application/x-ofx,application/ofx"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) importMut.mutate(f);
-                e.target.value = "";
-              }}
-            />
-            <input
-              ref={contasFileRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) importContasMut.mutate(f);
-                e.target.value = "";
-              }}
-            />
-          </div>
-          <div className="flex flex-wrap gap-2 items-end text-xs text-[var(--text-muted)]">
-            <label className="flex flex-col gap-1">
-              <span title="Data e valor do saldo bancário a partir do qual o extrato começa">
-                Saldo inicial (âncora)
-              </span>
-              <span className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  aria-label="Data do saldo inicial"
-                  className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-1"
-                  value={saldoInicial.data}
-                  onChange={(e) => setSaldoInicial((s) => ({ ...s, data: e.target.value }))}
-                />
-                <input
-                  type="number"
-                  placeholder="R$"
-                  aria-label="Valor do saldo inicial"
-                  className="w-24 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-1"
-                  value={saldoInicial.valor}
-                  onChange={(e) => setSaldoInicial((s) => ({ ...s, valor: e.target.value }))}
-                />
-              </span>
-            </label>
-            {d.ultimaDataExtrato && (
-              <span>Último extrato: {formatDateBR(d.ultimaDataExtrato)}</span>
-            )}
-          </div>
-        </div>
-        <p className="text-xs text-[var(--text-muted)] leading-snug">
-          Extrato: OFX · Conta/Titulares CSV · Viacredi CSV · Gendo <em>transacoes.csv</em> · Contas
-          a pagar: <em>transacoes_contas.csv</em>
-        </p>
-      </section>
 
       {modal && (
         <FluxoLancamentoModal
@@ -612,6 +526,9 @@ export default function FluxoTab() {
             refresh();
           }}
         />
+      )}
+      {extratoOpen && (
+        <ImportExtratoModal onClose={() => setExtratoOpen(false)} onSaved={refresh} />
       )}
       {planilhaOpen && (
         <ImportPlanilhaModal
@@ -643,9 +560,9 @@ function Kpi({
     tone === "green"
       ? "text-[var(--green)]"
       : tone === "red"
-        ? "text-[var(--red)]"
+        ? "text-[var(--red-text)]"
         : tone === "accent"
-          ? "text-[var(--accent)]"
+          ? "text-[var(--accent-text)]"
           : "text-[var(--text)]";
   const pad = size === "compact" ? "px-4 py-3" : "p-4";
   const valueSize = size === "compact" ? "text-xl" : "text-3xl";

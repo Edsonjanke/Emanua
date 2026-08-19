@@ -13,6 +13,8 @@ export interface ExtratoRow {
   tipo: "C" | "D";
   ocorrencia: number;
   dedupKey: string;
+  /** Ordem de leitura no arquivo (para intercalar com as ignoradas no preview). */
+  seq?: number;
   /** Metadados Gendo — sync com receitas/despesas no import. */
   categoria?: string | null;
   descricao?: string | null;
@@ -23,14 +25,57 @@ export interface ExtratoRow {
 
 export type ExtratoFormato = "viacredi" | "gendo-transacoes" | "conta-titulares" | "ofx";
 
+/**
+ * Linha reconhecida no arquivo mas deliberadamente fora do extrato
+ * (SALDO ANTERIOR, Tipo=Todos, Realizado=Não). Sempre com motivo.
+ */
+export interface ExtratoRowIgnorada {
+  data: string | null;
+  historico: string;
+  documento: string | null;
+  valor: number | null;
+  tipo: "C" | "D" | null;
+  motivo: string;
+  seq: number;
+}
+
+/**
+ * Linha de DADOS do arquivo que o leitor não conseguiu interpretar.
+ *
+ * Antes essas linhas viravam só uma string em `erros` e sumiam do balanço: não
+ * entravam em `rows` nem em `ignoradas`, e como `linhasLidas` era calculado como
+ * `rows.length + ignoradas.length`, a conta fechava POR CONSTRUÇÃO — o balanço
+ * era incapaz de detectar exatamente a coisa para a qual existe. Agora toda
+ * linha descartada vira um registro com motivo e entra no balanço.
+ */
+export interface ExtratoRowNaoLida {
+  /** Número da linha no arquivo (1-based). No OFX, o número da transação. */
+  linha: number;
+  /** Por que o leitor não conseguiu ler. */
+  motivo: string;
+  /** Trecho do conteúdo cru, para o usuário reconhecer a linha no arquivo. */
+  conteudo: string;
+  seq: number;
+}
+
 export interface ExtratoParseResult {
   header: ExtratoHeader | null;
   rows: ExtratoRow[];
   erros: string[];
+  /**
+   * Quantas linhas de DADOS o arquivo tem, contadas NA FONTE, antes de qualquer
+   * filtro. Nunca derive isto de `rows`/`ignoradas`: é justamente contra a perda
+   * silenciosa de linha que este número existe.
+   */
+  linhasArquivo: number;
+  /** Linhas de dados que o leitor não conseguiu interpretar, com motivo. */
+  naoLidas: ExtratoRowNaoLida[];
   /** Formato detectado (para UI). */
   formato?: ExtratoFormato;
   /** Linhas Realizado=Não ignoradas no extrato (só Gendo). */
   ignoradasNaoRealizadas?: number;
+  /** Linhas ignoradas com motivo (SALDO ANTERIOR, Tipo=Todos, Realizado=Não). */
+  ignoradas?: ExtratoRowIgnorada[];
   /** Titular / nome sugerido para a conta. */
   titular?: string | null;
   /**
@@ -42,6 +87,15 @@ export interface ExtratoParseResult {
 
 export function normalizeHistorico(s: string): string {
   return s.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/**
+ * Sobra do parse: linha de dados que não virou `row`, nem `ignorada`, nem
+ * `naoLida`. TEM que ser zero em todo arquivo que o app aceita importar — é a
+ * mesma invariante do balanço, medida uma etapa antes, dentro do leitor.
+ */
+export function linhasSemCategoria(p: ExtratoParseResult): number {
+  return p.linhasArquivo - (p.rows.length + (p.ignoradas?.length ?? 0) + p.naoLidas.length);
 }
 
 export function buildDedupKey(
@@ -113,10 +167,16 @@ function isOfxText(texto: string): boolean {
   return t.includes("OFXHEADER") || t.includes("<OFX>") || t.includes("<STMTTRN>");
 }
 
+/**
+ * Data OFX compacta (YYYYMMDD...). O ramo compacto montava a string sem conferir
+ * o calendário — só parseBrDate tinha essa guarda. Resultado: <DTPOSTED>20269999
+ * entrava como "2026-99-99" e derrubava /api/extrato/preview em fluxo-utils.ts,
+ * e 20260229 passava num ano que não é bissexto.
+ */
 function parseOfxDate(s: string | null | undefined): string | null {
   if (!s) return null;
   const compact = s.trim().match(/^(\d{4})(\d{2})(\d{2})/);
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  if (compact) return parseBrDate(`${compact[1]}-${compact[2]}-${compact[3]}`);
   return parseBrDate(s);
 }
 
@@ -131,6 +191,53 @@ function isSaldoAnterior(titulo: string, tipo?: string): boolean {
   const tipoN = tipo ? normHeaderCell(tipo) : "";
   if (tipoN === "todos") return true;
   return t.includes("saldo anterior") || t === "saldo";
+}
+
+/**
+ * Saldo de abertura do arquivo: o valor da linha SALDO ANTERIOR que o parser
+ * separou em `ignoradas`. É o outro extremo do fechamento — com ele dá para
+ * conferir se creditos - debitos bate com saldoFinal - saldoInicial.
+ */
+export function saldoInicialDe(
+  ignoradas: ExtratoRowIgnorada[] | undefined,
+): { data: string | null; valor: number } | null {
+  for (const ig of ignoradas ?? []) {
+    if (ig.valor == null) continue;
+    if (isSaldoAnterior(ig.historico)) return { data: ig.data, valor: ig.valor };
+  }
+  return null;
+}
+
+/**
+ * Manchete de erro quando o arquivo não é um extrato reconhecível.
+ * Erro de arquivo é erro do usuário: precisa dizer QUAL arquivo, o que houve e
+ * o que fazer agora — não devolver o resmungo do leitor ("menos de 5 campos").
+ * O detalhe técnico vai junto, embaixo, como nota de rodapé.
+ */
+export function mensagemArquivoInvalido(
+  nomeArquivo: string,
+  texto: string,
+  erros: string[],
+  /**
+   * O que o leitor conseguiu tirar do arquivo. Sem isto a mensagem dizia
+   * "o arquivo não tem as colunas de um extrato" até para arquivos em que ele
+   * leu as transações direitinho e só faltou o cabeçalho da conta — e aí o
+   * usuário ia procurar um problema que não existe.
+   */
+  parsed?: Pick<ExtratoParseResult, "rows" | "linhasArquivo">,
+): string {
+  const nome = nomeArquivo?.trim() || "o arquivo";
+  const lidas = parsed?.rows?.length ?? 0;
+  const manchete =
+    texto.trim().length === 0
+      ? `“${nome}” está vazio — o download não trouxe nenhuma linha. Baixe o extrato de novo pelo aplicativo do banco.`
+      : lidas > 0
+        ? `“${nome}” tem ${lidas} ${lidas === 1 ? "transação" : "transações"}, mas não diz DE QUAL CONTA é: falta a linha de cabeçalho com a agência e o número da conta, no topo do arquivo. Sem ela eu não tenho como saber onde gravar — e não vou adivinhar a conta a partir de uma linha de movimento. Baixe o extrato de novo pelo aplicativo do banco, sem abrir nem salvar por cima no Excel.`
+        : `Não reconheci “${nome}” como extrato. O arquivo não tem as colunas de um extrato (data, histórico, valor, tipo). Baixe o extrato em CSV ou OFX pelo aplicativo do banco, sem abrir nem salvar por cima no Excel — ou confira se não escolheu outro arquivo por engano.`;
+  const detalhe = (erros ?? []).find((e) => e && e.trim().length > 0);
+  return detalhe ? `${manchete}
+
+O que o leitor encontrou: ${detalhe}` : manchete;
 }
 
 function inferFormaHistorico(historico: string): "dinheiro" | "pix" | "cartao" {
@@ -155,17 +262,55 @@ function isReceitaGendo(categoria: string): boolean {
   return c.includes("pagamento") || c.includes("receita") || c.includes("venda");
 }
 
-function pushRow(
-  rows: ExtratoRow[],
-  contagem: Map<string, number>,
-  partial: Omit<ExtratoRow, "ocorrencia" | "dedupKey">,
-) {
+/** Estado mutável de um parse: linhas aceitas, ignoradas, não lidas, ocorrência e ordem de leitura. */
+interface Coletor {
+  rows: ExtratoRow[];
+  ignoradas: ExtratoRowIgnorada[];
+  naoLidas: ExtratoRowNaoLida[];
+  contagem: Map<string, number>;
+  seq: number;
+  /** Linhas de dados vistas na fonte, antes de qualquer filtro. */
+  lidasDoArquivo: number;
+}
+
+function novoColetor(): Coletor {
+  return { rows: [], ignoradas: [], naoLidas: [], contagem: new Map(), seq: 0, lidasDoArquivo: 0 };
+}
+
+/**
+ * Linhas não vazias com o número ORIGINAL de cada uma no arquivo. Sem isso o
+ * "Linha 12" da mensagem apontava para outra linha em qualquer arquivo com
+ * linha em branco no meio — e o usuário não achava o problema.
+ */
+function linhasUteis(texto: string): { conteudo: string[]; numero: number[] } {
+  const conteudo: string[] = [];
+  const numero: number[] = [];
+  texto
+    .replace(/^﻿/, "")
+    .split(/\r?\n/)
+    .forEach((l, i) => {
+      if (l.trim().length > 0) {
+        conteudo.push(l);
+        numero.push(i + 1);
+      }
+    });
+  return { conteudo, numero };
+}
+
+/** Recorte curto do conteúdo cru, o bastante para o usuário achar a linha no arquivo. */
+function recorte(s: string): string {
+  const t = String(s ?? "").replace(/\s+/g, " ").trim();
+  return t.length > 120 ? `${t.slice(0, 117)}…` : t;
+}
+
+function pushRow(col: Coletor, partial: Omit<ExtratoRow, "ocorrencia" | "dedupKey" | "seq">) {
   const chaveBase = `${partial.data}|${partial.historico}|${partial.documento ?? ""}|${partial.valor.toFixed(2)}|${partial.tipo}`;
-  const ocorrencia = (contagem.get(chaveBase) ?? 0) + 1;
-  contagem.set(chaveBase, ocorrencia);
-  rows.push({
+  const ocorrencia = (col.contagem.get(chaveBase) ?? 0) + 1;
+  col.contagem.set(chaveBase, ocorrencia);
+  col.rows.push({
     ...partial,
     ocorrencia,
+    seq: col.seq++,
     dedupKey: buildDedupKey(
       partial.data,
       partial.historico,
@@ -177,16 +322,50 @@ function pushRow(
   });
 }
 
+function pushIgnorada(col: Coletor, partial: Omit<ExtratoRowIgnorada, "seq">) {
+  col.ignoradas.push({ ...partial, seq: col.seq++ });
+}
+
+/**
+ * Registra a linha que o leitor não entendeu. É a ÚNICA saída permitida para
+ * uma linha de dados que não vira `row` nem `ignorada` — nenhum `continue` do
+ * laço pode escapar sem passar por aqui, ou a linha some do balanço.
+ */
+function pushNaoLida(col: Coletor, linha: number, motivo: string, conteudo: string) {
+  col.naoLidas.push({ linha, motivo, conteudo: recorte(conteudo), seq: col.seq++ });
+}
+
+/** Frase de erro (lista `erros`) equivalente ao registro de não lida. */
+function textoNaoLida(n: ExtratoRowNaoLida): string {
+  return `Linha ${n.linha}: ${n.motivo}${n.conteudo ? ` — “${n.conteudo}”` : ""}`;
+}
+
+/** `erros` derivado das não lidas, para quem só consome a lista de strings. */
+function errosDe(col: Coletor): string[] {
+  return col.naoLidas.map(textoNaoLida);
+}
+
 /**
  * CSV Gendo / agenda: Data;Vencimento;Comanda;Responsável;Categoria;Descrição;Realizado;Valor
  * Só Realizado=Sim entra no extrato. Valor negativo = débito.
  */
 export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
-  const erros: string[] = [];
-  const rows: ExtratoRow[] = [];
+  const col = novoColetor();
+  const rows = col.rows;
   let ignoradasNaoRealizadas = 0;
-  const linhas = texto.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (!linhas.length) return { header: null, rows, erros: ["CSV vazio."], formato: "gendo-transacoes" };
+  const { conteudo: linhas, numero: numLinha } = linhasUteis(texto);
+  if (!linhas.length) {
+    return {
+      header: null,
+      rows,
+      erros: ["O arquivo não tem nenhuma linha — está vazio."],
+      linhasArquivo: 0,
+      naoLidas: [],
+      formato: "gendo-transacoes",
+    };
+  }
+  // Linhas de DADOS do arquivo, contadas na fonte: tudo menos o cabeçalho.
+  col.lidasDoArquivo = linhas.length - 1;
 
   const headerCols = splitCsvSemi(linhas[0]).map(normHeaderCell);
   const iData = headerCols.findIndex((h) => h === "data");
@@ -198,28 +377,53 @@ export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
   const iVenc = headerCols.findIndex((h) => h === "vencimento");
 
   if (iData < 0 || iValor < 0 || iDesc < 0) {
+    /*
+     * Sem saber em que coluna estão Data, Descrição e Valor, NENHUMA linha pode
+     * ser lida — e cada uma delas precisa aparecer como não lida. Antes este
+     * return devolvia `naoLidas: []` com `linhasArquivo` cheio: as linhas
+     * ficavam contadas e sem categoria nenhuma, o mesmo buraco do cabeçalho.
+     */
+    for (let n = 1; n < linhas.length; n++) {
+      pushNaoLida(
+        col,
+        numLinha[n],
+        "o cabeçalho deste arquivo não traz as colunas Data, Descrição e Valor, então não dá para saber o que cada campo é.",
+        linhas[n],
+      );
+    }
     return {
       header: null,
       rows,
-      erros: ["Cabeçalho Gendo inválido (precisa Data, Descrição e Valor)."],
+      erros: ["Cabeçalho Gendo inválido (precisa Data, Descrição e Valor).", ...errosDe(col)],
+      linhasArquivo: col.lidasDoArquivo,
+      naoLidas: col.naoLidas,
       formato: "gendo-transacoes",
     };
   }
 
-  const contagem = new Map<string, number>();
-
   for (let n = 1; n < linhas.length; n++) {
     const campos = splitCsvSemi(linhas[n]);
     const realizado = iReal >= 0 ? normHeaderCell(campos[iReal] ?? "") : "sim";
-    if (realizado === "nao" || realizado === "não") {
+    const naoRealizado =
+      realizado === "nao" ||
+      realizado === "não" ||
+      (!!realizado && realizado !== "sim" && !["s", "yes", "true", "1", "pago"].includes(realizado));
+    if (naoRealizado) {
       ignoradasNaoRealizadas++;
+      const catIg = (iCat >= 0 ? campos[iCat] : "") || "";
+      const descIg = campos[iDesc] ?? "";
+      const signedIg = parseBrNumber((campos[iValor] ?? "").replace(/^"|"$/g, ""));
+      pushIgnorada(col, {
+        data: parseBrDate(campos[iData] ?? "") ?? (iVenc >= 0 ? parseBrDate(campos[iVenc] ?? "") : null),
+        historico: normalizeHistorico(
+          [catIg, descIg].filter((x) => x && x !== "--").join(" - ") || descIg || catIg,
+        ),
+        documento: null,
+        valor: signedIg != null ? Math.abs(signedIg) : null,
+        tipo: signedIg == null ? null : signedIg > 0 ? "C" : "D",
+        motivo: "Realizado=Não no Gendo (ainda não passou na conta).",
+      });
       continue;
-    }
-    if (realizado && realizado !== "sim") {
-      if (!["s", "yes", "true", "1", "pago"].includes(realizado)) {
-        ignoradasNaoRealizadas++;
-        continue;
-      }
     }
 
     const data = parseBrDate(campos[iData] ?? "") ?? (iVenc >= 0 ? parseBrDate(campos[iVenc] ?? "") : null);
@@ -233,14 +437,19 @@ export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
     const signed = parseBrNumber((campos[iValor] ?? "").replace(/^"|"$/g, ""));
 
     if (!data || !historico || signed == null || signed === 0) {
-      erros.push(`Linha ${n + 1} ignorada (data/descrição/valor inválidos).`);
+      const falta = [
+        !data ? "a data" : null,
+        !historico ? "a descrição" : null,
+        signed == null ? "o valor" : signed === 0 ? "um valor diferente de zero" : null,
+      ].filter(Boolean);
+      pushNaoLida(col, numLinha[n], `não deu para ler ${falta.join(" nem ")}.`, linhas[n]);
       continue;
     }
 
     const tipo: "C" | "D" = signed > 0 ? "C" : "D";
     const valor = Math.abs(signed);
 
-    pushRow(rows, contagem, {
+    pushRow(col, {
       data,
       historico,
       documento,
@@ -257,9 +466,12 @@ export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
   return {
     header: { agencia: "gendo", conta: "transacoes" },
     rows,
-    erros,
+    erros: errosDe(col),
+    linhasArquivo: col.lidasDoArquivo,
+    naoLidas: col.naoLidas,
     formato: "gendo-transacoes",
     ignoradasNaoRealizadas,
+    ignoradas: col.ignoradas,
   };
 }
 
@@ -268,13 +480,12 @@ export function parseGendoTransacoesCsv(texto: string): ExtratoParseResult {
  * Ignora SALDO ANTERIOR e Tipo=Todos.
  */
 export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
-  const erros: string[] = [];
-  const rows: ExtratoRow[] = [];
+  const col = novoColetor();
+  const rows = col.rows;
   const linhas = texto.replace(/^\uFEFF/, "").split(/\r?\n/);
   let contaNum = "";
   let titular: string | null = null;
   let iCols: ReturnType<typeof mapContaTitularesCols> | null = null;
-  const contagem = new Map<string, number>();
   /** Saldos lidos do arquivo (último ganha = fechamento). */
   let saldoArquivo: number | null = null;
   let dataExtrato: string | null = null;
@@ -316,17 +527,56 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
       iCols = mapContaTitularesCols(campos.map(normHeaderCell));
       continue;
     }
-    if (!iCols) continue;
+
+    // Daqui para baixo é LINHA DE DADOS: conta na fonte, antes de qualquer
+    // filtro. Nenhuma saída abaixo pode ser um `continue` mudo.
+    col.lidasDoArquivo++;
+
+    if (!iCols) {
+      pushNaoLida(
+        col,
+        n + 1,
+        "linha antes do cabeçalho de colunas (ID;Titulo;Valor;Tipo;…), não dá para saber o que cada campo é.",
+        raw,
+      );
+      continue;
+    }
 
     const titulo = campos[iCols.titulo] ?? "";
     const tipoRaw = campos[iCols.tipo] ?? "";
-    if (isSaldoAnterior(titulo, tipoRaw)) continue;
+    if (isSaldoAnterior(titulo, tipoRaw)) {
+      const vIg = parseBrNumber(campos[iCols.valor] ?? "");
+      pushIgnorada(col, {
+        data:
+          parseBrDate(campos[iCols.dataTransacao] ?? "") ?? parseBrDate(campos[iCols.data] ?? "") ?? null,
+        historico: normalizeHistorico(titulo),
+        documento: null,
+        valor: vIg,
+        tipo: null,
+        motivo:
+          normHeaderCell(tipoRaw) === "todos"
+            ? "Linha de saldo (Tipo=Todos), não é movimentação."
+            : "SALDO ANTERIOR, não é movimentação.",
+      });
+      continue;
+    }
 
     const tipoN = normHeaderCell(tipoRaw);
     let tipo: "C" | "D" | null = null;
     if (tipoN.startsWith("credito") || tipoN === "c" || tipoN === "credit") tipo = "C";
     else if (tipoN.startsWith("debito") || tipoN === "d" || tipoN === "debit") tipo = "D";
-    else continue;
+    else {
+      // Era um `continue` mudo: a linha sumia sem entrar em nada.
+      pushNaoLida(
+        col,
+        n + 1,
+        tipoRaw.trim()
+          ? `a coluna Tipo diz “${tipoRaw.trim()}”, e eu só entendo Crédito ou Débito.`
+          : "a coluna Tipo veio vazia, e sem ela não dá para saber se entra ou sai.",
+        raw,
+      );
+      continue;
+    }
 
     const data =
       parseBrDate(campos[iCols.dataTransacao] ?? "") ?? parseBrDate(campos[iCols.data] ?? "") ?? null;
@@ -338,11 +588,22 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
     const documento = (id && id !== "0" ? id : "") || doc || null;
 
     if (!data || !historico || valor == null || valor <= 0) {
-      erros.push(`Linha ${n + 1} ignorada (data/título/valor inválidos).`);
+      const falta = [
+        !data ? "a data" : null,
+        !historico ? "o título" : null,
+        valor == null
+          ? "o valor"
+          : valor === 0
+            ? "um valor diferente de zero (esta linha veio R$ 0,00)"
+            : valor < 0
+              ? "um valor positivo (esta linha veio negativa; o sinal quem dá é a coluna Tipo)"
+              : null,
+      ].filter(Boolean);
+      pushNaoLida(col, n + 1, `não deu para ler ${falta.join(" nem ")}.`, raw);
       continue;
     }
 
-    pushRow(rows, contagem, {
+    pushRow(col, {
       data,
       historico,
       documento,
@@ -355,9 +616,17 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
   if (!contaNum) {
     return {
       header: null,
-      rows: [],
-      erros: ["CSV Conta/Titulares sem número de conta."],
+      // As linhas lidas vão junto mesmo sem conta: zerá-las aqui abriria o mesmo
+      // buraco do cabeçalho — linha contada em `linhasArquivo` e em categoria
+      // nenhuma. Sem `header` o import recusa o arquivo de qualquer jeito.
+      rows,
+      erros: [
+        "O arquivo parece um extrato, mas não traz o número da conta no topo (linha \"Conta;…\"). Baixe o extrato de novo pelo aplicativo do banco, sem editar o arquivo.",
+      ],
+      linhasArquivo: col.lidasDoArquivo,
+      naoLidas: col.naoLidas,
       formato: "conta-titulares",
+      ignoradas: col.ignoradas,
     };
   }
 
@@ -370,10 +639,13 @@ export function parseContaTitularesCsv(texto: string): ExtratoParseResult {
   return {
     header: { agencia: "banco", conta: contaNum },
     rows,
-    erros,
+    erros: errosDe(col),
+    linhasArquivo: col.lidasDoArquivo,
+    naoLidas: col.naoLidas,
     formato: "conta-titulares",
     titular,
     saldoExtrato,
+    ignoradas: col.ignoradas,
   };
 }
 
@@ -394,24 +666,43 @@ function mapContaTitularesCols(h: string[]) {
  * Ignora SALDO ANTERIOR.
  */
 export function parseExtratoOfx(texto: string): ExtratoParseResult {
-  const erros: string[] = [];
-  const rows: ExtratoRow[] = [];
+  const col = novoColetor();
+  const rows = col.rows;
   const limpo = texto.replace(/^\uFEFF/, "");
   if (!isOfxText(limpo)) {
-    return { header: null, rows, erros: ["Arquivo não parece OFX."], formato: "ofx" };
+    return {
+      header: null,
+      rows,
+      erros: ["Arquivo não parece OFX."],
+      linhasArquivo: 0,
+      naoLidas: [],
+      formato: "ofx",
+    };
   }
 
   const acctRaw = ofxTag(limpo, "ACCTID") || "";
   const acct = acctRaw.replace(/\D/g, "") || acctRaw.trim();
   const titular = ofxTag(limpo, "HOLDER") || null;
-  const contagem = new Map<string, number>();
 
   const trnBlocks = limpo.split(/<STMTTRN>/i).slice(1);
+  // Transações do arquivo, contadas na FONTE: um <STMTTRN> é uma linha de dados.
+  col.lidasDoArquivo = trnBlocks.length;
   for (let i = 0; i < trnBlocks.length; i++) {
     const block = trnBlocks[i].split(/<\/STMTTRN>/i)[0] ?? trnBlocks[i];
     const name = ofxTag(block, "NAME") || ofxTag(block, "MEMO") || "";
     const trnType = (ofxTag(block, "TRNTYPE") || "").toUpperCase();
-    if (isSaldoAnterior(name)) continue;
+    if (isSaldoAnterior(name)) {
+      const amtIg = parseBrNumber(ofxTag(block, "TRNAMT") || "");
+      pushIgnorada(col, {
+        data: parseOfxDate(ofxTag(block, "DTPOSTED")),
+        historico: normalizeHistorico(name),
+        documento: null,
+        valor: amtIg != null ? Math.abs(amtIg) : null,
+        tipo: null,
+        motivo: "SALDO ANTERIOR, não é movimentação.",
+      });
+      continue;
+    }
 
     let tipo: "C" | "D" | null = null;
     if (trnType.includes("CREDIT") || trnType === "DEP" || trnType === "DIRECTDEP") tipo = "C";
@@ -425,14 +716,14 @@ export function parseExtratoOfx(texto: string): ExtratoParseResult {
       tipo = "D";
 
     const amtRaw = ofxTag(block, "TRNAMT") || "";
-    let signed = parseBrNumber(amtRaw);
-    if (signed == null) {
-      const us = Number(amtRaw.replace(",", ""));
-      signed = Number.isFinite(us) ? us : null;
-    }
+    // A especificação do OFX manda ponto decimal, mas os bancos brasileiros emitem
+    // vírgula ("19,47") — o extrato real em tests/core.test.ts é assim. parseBrNumber
+    // resolve os dois porque decide pelo separador que aparece por ÚLTIMO.
+    // Antes ele apagava todo ponto antes de decidir, e "-480.26" entrava como -48026:
+    // todo OFX com centavos era importado 100x maior, em silêncio.
+    const signed = parseBrNumber(amtRaw);
     if (signed != null && signed < 0) {
       tipo = "D";
-      signed = Math.abs(signed);
     } else if (signed != null && signed > 0 && !tipo) {
       tipo = "C";
     }
@@ -447,11 +738,26 @@ export function parseExtratoOfx(texto: string): ExtratoParseResult {
     const documento = fitid || checknum || null;
 
     if (!data || !historico || valor == null || valor <= 0 || !tipo) {
-      erros.push(`Transação OFX ${i + 1} ignorada (data/nome/valor/tipo inválidos).`);
+      const falta = [
+        !data ? "a data (DTPOSTED)" : null,
+        !historico ? "o nome (NAME/MEMO)" : null,
+        valor == null
+          ? "o valor (TRNAMT)"
+          : valor === 0
+            ? "um valor diferente de zero (TRNAMT veio 0)"
+            : null,
+        !tipo ? "o tipo (TRNTYPE não é crédito nem débito)" : null,
+      ].filter(Boolean);
+      pushNaoLida(
+        col,
+        i + 1,
+        `transação ${i + 1} do OFX: não deu para ler ${falta.join(" nem ")}.`,
+        block,
+      );
       continue;
     }
 
-    pushRow(rows, contagem, {
+    pushRow(col, {
       data,
       historico,
       documento,
@@ -464,10 +770,15 @@ export function parseExtratoOfx(texto: string): ExtratoParseResult {
   if (!acct) {
     return {
       header: null,
-      rows: [],
+      // Idem conta-titulares: as transações lidas continuam na resposta para que
+      // `linhasArquivo` nunca fique maior do que a soma das categorias.
+      rows,
       erros: ["OFX sem ACCTID (número da conta)."],
+      linhasArquivo: col.lidasDoArquivo,
+      naoLidas: col.naoLidas,
       formato: "ofx",
       titular,
+      ignoradas: col.ignoradas,
     };
   }
 
@@ -480,10 +791,13 @@ export function parseExtratoOfx(texto: string): ExtratoParseResult {
   return {
     header: { agencia: "banco", conta: acct },
     rows,
-    erros,
+    erros: errosDe(col),
+    linhasArquivo: col.lidasDoArquivo,
+    naoLidas: col.naoLidas,
     formato: "ofx",
     titular,
     saldoExtrato,
+    ignoradas: col.ignoradas,
   };
 }
 
@@ -497,11 +811,53 @@ export function parseExtratoArquivo(texto: string, filenameHint?: string): Extra
   return parseExtratoCsv(limpo);
 }
 
+/**
+ * A linha do CSV Viacredi é uma transação VÁLIDA? É a régua do próprio parser,
+ * extraída para poder ser reusada pelo detector de cabeçalho — as duas TÊM que
+ * ser a mesma, ou uma linha de dados cai no vão entre elas.
+ */
+function ehTransacaoViacrediValida(campos: string[]): boolean {
+  if (campos.length < 5) return false;
+  const data = parseBrDate(campos[0] ?? "");
+  const historico = normalizeHistorico(campos[1] ?? "");
+  const valor = parseBrNumber(campos[3] ?? "");
+  const tipoRaw = (campos[4] ?? "").trim().toUpperCase();
+  return (
+    !!data && !!historico && valor != null && valor > 0 && (tipoRaw === "C" || tipoRaw === "D")
+  );
+}
+
+/**
+ * A primeira linha é DADO ou é o cabeçalho da conta (agência;descrição;conta)?
+ *
+ * A régua era `/^\d{2}\/\d{2}\//` — MAIS ESTREITA que a de `parseBrDate`, que
+ * também lê ISO. Uma linha "2026-07-01;ISO PRIMEIRA LINHA;D900;999,00;C" era
+ * engolida como cabeçalho: saía de `rows` E de `linhasArquivo`, não virava
+ * `naoLida` nem `ignorada`, e o balanço fechava em VERDE com o crédito de
+ * R$ 999,00 desaparecido do sistema — e ainda pior, a data virava agência e o
+ * documento virava número de conta.
+ *
+ * Agora vale a régua do parser: se a linha é uma transação válida, é dado. E se
+ * ela só COMEÇA com uma data que `parseBrDate` lê, também é dado — quebrada,
+ * mas do extrato: vai para `naoLida`, que é uma categoria do balanço, com
+ * motivo e número da linha. Cabeçalho de conta não começa com data.
+ */
+function ehLinhaDeDadosViacredi(campos: string[]): boolean {
+  if (ehTransacaoViacrediValida(campos)) return true;
+  return parseBrDate(campos[0] ?? "") != null;
+}
+
 export function parseExtratoCsv(texto: string): ExtratoParseResult {
   const limpo = texto.replace(/^\uFEFF/, "");
-  const linhas = limpo.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const { conteudo: linhas, numero: numLinha } = linhasUteis(limpo);
   if (linhas.length === 0) {
-    return { header: null, rows: [], erros: ["CSV vazio."] };
+    return {
+      header: null,
+      rows: [],
+      erros: ["O arquivo não tem nenhuma linha — está vazio."],
+      linhasArquivo: 0,
+      naoLidas: [],
+    };
   }
 
   if (isOfxText(limpo)) {
@@ -516,25 +872,36 @@ export function parseExtratoCsv(texto: string): ExtratoParseResult {
     return parseContaTitularesCsv(limpo);
   }
 
-  const erros: string[] = [];
-  const rows: ExtratoRow[] = [];
+  const col = novoColetor();
+  const rows = col.rows;
   let header: ExtratoHeader | null = null;
 
-  let inicio = 0;
-  if (!/^\d{2}\/\d{2}\//.test(linhas[0].trim().replace(/^"/, ""))) {
-    const campos = splitCsvSemi(linhas[0]);
-    if (campos[0] && campos[2]) {
-      header = { agencia: campos[0], conta: campos[2] };
-    }
-    inicio = 1;
+  /*
+   * CONTAGEM PRIMEIRO, decisão de cabeçalho DEPOIS — e a decisão é a única
+   * coisa autorizada a tirar uma linha da contagem, no máximo uma, e por
+   * escrito. `totalLinhas` é o arquivo inteiro (menos as linhas em branco), lido
+   * antes de qualquer régua.
+   */
+  const totalLinhas = linhas.length;
+  const primeira = splitCsvSemi(linhas[0]);
+  const temCabecalho = !ehLinhaDeDadosViacredi(primeira);
+  const inicio = temCabecalho ? 1 : 0;
+  if (temCabecalho && primeira[0] && primeira[2]) {
+    header = { agencia: primeira[0], conta: primeira[2] };
   }
 
-  const contagem = new Map<string, number>();
+  // Linhas de DADOS do arquivo, contadas na fonte: tudo menos o cabeçalho.
+  col.lidasDoArquivo = Math.max(0, totalLinhas - inicio);
 
   for (let n = inicio; n < linhas.length; n++) {
     const campos = splitCsvSemi(linhas[n]);
     if (campos.length < 5) {
-      erros.push(`Linha ${n + 1} ignorada (menos de 5 campos).`);
+      pushNaoLida(
+        col,
+        numLinha[n],
+        `um extrato tem 5 colunas separadas por ponto e vírgula (data; histórico; documento; valor; tipo) e esta tem ${campos.length}.`,
+        linhas[n],
+      );
       continue;
     }
 
@@ -546,12 +913,26 @@ export function parseExtratoCsv(texto: string): ExtratoParseResult {
     const tipoRaw = (campos[4] ?? "").trim().toUpperCase();
 
     if (!data || !historico || valor == null || valor <= 0 || (tipoRaw !== "C" && tipoRaw !== "D")) {
-      erros.push(`Linha ${n + 1} ignorada (data/histórico/valor/tipo inválidos).`);
+      const falta = [
+        !data ? "a data" : null,
+        !historico ? "o histórico" : null,
+        valor == null
+          ? "o valor"
+          : valor === 0
+            ? "um valor diferente de zero (esta linha veio R$ 0,00)"
+            : valor < 0
+              ? "um valor positivo (esta linha veio negativa; o sinal quem dá é a coluna tipo)"
+              : null,
+        tipoRaw !== "C" && tipoRaw !== "D"
+          ? `o tipo C ou D (veio ${tipoRaw ? `“${tipoRaw}”` : "vazio"})`
+          : null,
+      ].filter(Boolean);
+      pushNaoLida(col, numLinha[n], `não deu para ler ${falta.join(" nem ")}.`, linhas[n]);
       continue;
     }
     const tipo = tipoRaw as "C" | "D";
 
-    pushRow(rows, contagem, {
+    pushRow(col, {
       data,
       historico,
       documento,
@@ -560,5 +941,13 @@ export function parseExtratoCsv(texto: string): ExtratoParseResult {
     });
   }
 
-  return { header, rows, erros, formato: "viacredi" };
+  return {
+    header,
+    rows,
+    erros: errosDe(col),
+    linhasArquivo: col.lidasDoArquivo,
+    naoLidas: col.naoLidas,
+    formato: "viacredi",
+    ignoradas: col.ignoradas,
+  };
 }

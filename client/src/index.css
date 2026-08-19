@@ -18,67 +18,91 @@
   --brand: #85ad61;
   --sage: #d4e3c4;
   --pine: #78a45a;
+  --amber: #8f6218;
   --focus-ring: #559265;
   --on-accent: #ebf5e9;
+  /*
+    Tons de TEXTO. --accent e --red sao calibrados para preenchimento e borda; como texto pequeno
+    eles reprovam no AA da WCAG sobre os dois fundos do app:
+      --accent #559265 -> 3,69:1 no branco / 3,30:1 no mint    (minimo 4,5:1)
+      --red    #c45c52 -> 4,20:1 no branco / 3,75:1 no mint
+    Os dois abaixo mantem o matiz e passam nos dois fundos:
+      --accent-text #3f7350 -> 5,56:1 / 4,97:1
+      --red-text    #ad4a43 -> 5,47:1 / 4,89:1
+    Use --accent/--red para bg e border; --accent-text/--red-text para texto e icone.
+  */
+  --accent-text: #3f7350;
+  --red-text: #ad4a43;
 }
 
-* {
-  box-sizing: border-box;
-}
+/*
+  Tudo daqui para baixo vive em @layer base de propósito.
+  `@import "tailwindcss"` registra as layers theme/base/components/utilities, e regra SEM layer
+  vence QUALQUER regra layered, por especificidade nenhuma. Enquanto o bloco de controles de
+  formulário abaixo ficou fora de layer, o `font: inherit` dele anulava text-xs/text-sm/font-medium
+  em todo <button>, <input>, <select> e <textarea> do app — as utilities eram inertes e tudo
+  renderizava 16px/400. Dentro de @layer base, utilities continuam ganhando e o inherit segue
+  valendo onde nenhuma utility foi declarada.
+*/
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-html,
-body,
-#root {
-  min-height: 100%;
-}
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
 
-body {
-  margin: 0;
-  font-family: "DM Sans", system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  -webkit-font-smoothing: antialiased;
-}
+  body {
+    margin: 0;
+    font-family: "DM Sans", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
 
-h1,
-.brand {
-  font-family: "Instrument Serif", Georgia, serif;
-  font-weight: 400;
-}
+  h1,
+  .brand {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-weight: 400;
+  }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 
-button {
-  transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out,
-    opacity 160ms ease-out;
-}
+  button {
+    transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out,
+      opacity 160ms ease-out;
+  }
 
-input,
-select,
-textarea {
-  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
-}
+  input,
+  select,
+  textarea {
+    transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
+  }
 
-input[type="checkbox"],
-input[type="radio"] {
-  accent-color: var(--accent);
-}
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--accent);
+  }
 
-:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
 }

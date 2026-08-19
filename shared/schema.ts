@@ -122,6 +122,11 @@ export const recebiveis = pgTable(
     valorPago: decimal("valor_pago", { precision: 12, scale: 2 }),
     status: text("status").notNull().default("aberta").$type<"aberta" | "paga" | "cancelada">(),
     observacoes: text("observacoes"),
+    recorrencia: text("recorrencia").$type<"mensal" | null>(),
+    /** Parcela atual (1-based) quando for pacote parcelado. */
+    parcelaAtual: integer("parcela_atual"),
+    /** Total de parcelas do parcelamento. */
+    totalParcelas: integer("total_parcelas"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [

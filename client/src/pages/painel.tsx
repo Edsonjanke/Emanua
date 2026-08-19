@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   Target,
@@ -34,6 +34,25 @@ export default function PainelPage() {
   const [tab, setTab] = useState<Tab>("fluxo");
   const { user, logout } = useAuth();
   const { hidden, toggle } = useMoney();
+  const navRef = useRef<HTMLElement>(null);
+
+  /**
+   * No celular a nav quebra em duas linhas (todas as seções ficam visíveis, sem
+   * rolagem escondendo metade delas). Só quando ela realmente rola na horizontal
+   * — telas estreitas de verdade — é que vale trazer a ativa para dentro da vista.
+   */
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav || nav.scrollWidth <= nav.clientWidth) return;
+    const ativo = nav.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!ativo) return;
+    const semAnimacao = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    ativo.scrollIntoView({
+      inline: "nearest",
+      block: "nearest",
+      behavior: semAnimacao ? "auto" : "smooth",
+    });
+  }, [tab]);
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -51,7 +70,9 @@ export default function PainelPage() {
             <h1 className="brand text-2xl md:text-3xl text-[var(--text)] leading-none tracking-tight">
               Emanua
             </h1>
-            <p className="text-xs text-[var(--text-muted)] mt-1">
+            {/* Linha de marca: no celular o cabeçalho já custa duas linhas de nav,
+                e a altura vale mais para a lista do que para o subtítulo. */}
+            <p className="hidden sm:block text-xs text-[var(--text-muted)] mt-1">
               Massoterapia · painel financeiro
             </p>
           </div>
@@ -78,7 +99,8 @@ export default function PainelPage() {
           </div>
         </div>
         <nav
-          className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto pb-0"
+          ref={navRef}
+          className="max-w-7xl mx-auto px-4 flex flex-wrap gap-x-1 md:flex-nowrap md:overflow-x-auto pb-0 scroll-px-4"
           aria-label="Seções do painel"
         >
           {TABS.map((t) => (
@@ -86,7 +108,8 @@ export default function PainelPage() {
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+              aria-current={tab === t.id ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-1.5 px-2.5 sm:px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 tab === t.id
                   ? "border-[var(--brand)] text-[var(--text)]"
                   : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"

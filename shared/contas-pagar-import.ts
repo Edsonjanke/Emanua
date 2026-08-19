@@ -69,7 +69,7 @@ export function parseGendoContasPagarCsv(
   const rows: ContaPagarImportRow[] = [];
   const hoje = hojeIso ?? new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
   const linhas = texto.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (!linhas.length) return { rows, erros: ["CSV vazio."], resumo: emptyResumo() };
+  if (!linhas.length) return { rows, erros: ["O arquivo não tem nenhuma linha — está vazio."], resumo: emptyResumo() };
 
   const headerCols = splitCsvSemi(linhas[0]).map(normHeaderCell);
   if (!isGendoContasPagarHeader(splitCsvSemi(linhas[0]))) {

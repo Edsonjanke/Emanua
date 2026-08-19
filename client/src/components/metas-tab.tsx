@@ -5,6 +5,8 @@ import { api } from "@/lib/api";
 import { useMoney } from "@/lib/hide-values";
 import { hojeBrasil } from "@/lib/date";
 import { nomesCategorias, useCategorias } from "@/lib/use-categorias";
+import { parseValorPositivoDigitado, parseNumeroDigitado } from "@shared/valor";
+import { InputDecimalBr, paraCampoDecimalBr } from "@/components/ui/input-decimal-br";
 
 export default function MetasTab() {
   const { format } = useMoney();
@@ -23,11 +25,21 @@ export default function MetasTab() {
   });
   const categoriasOpts = nomesCategorias(catsQ.data, novo.categoria);
 
+  /*
+   * Meta e margem também eram `type="number"`: quem digitasse "12.000,00" ou
+   * "58,5" — do jeito brasileiro — mandava texto que o servidor não lia.
+   * Campo em branco continua significando "não mexi nesse".
+   */
+  const metaFatLida = parseValorPositivoDigitado(metaFat);
+  const erroMetaFat = metaFat.trim() === "" || metaFatLida.ok ? null : metaFatLida.erro;
+  const margemLida = parseNumeroDigitado(margem);
+  const erroMargem = margem.trim() === "" || margemLida.ok ? null : margemLida.erro;
+
   const saveMeta = useMutation({
     mutationFn: () =>
       api.put("/api/metas", {
-        metaFaturamento: metaFat || metas.data?.metaFaturamento,
-        margemContribuicaoPct: margem || metas.data?.margemContribuicaoPct,
+        metaFaturamento: metaFatLida.ok ? metaFatLida.valor : metas.data?.metaFaturamento,
+        margemContribuicaoPct: margemLida.ok ? margemLida.valor : metas.data?.margemContribuicaoPct,
       }),
     onSuccess: () => {
       toast.success("Metas salvas");
@@ -36,18 +48,24 @@ export default function MetasTab() {
     },
   });
 
+  const fixoLido = parseValorPositivoDigitado(novo.valorMensal);
+  const erroFixo = novo.valorMensal.trim() === "" || fixoLido.ok ? null : fixoLido.erro;
+
   const addFixo = useMutation({
-    mutationFn: () =>
-      api.post("/api/custos-fixos", {
+    mutationFn: async () => {
+      if (!fixoLido.ok) throw new Error(fixoLido.erro);
+      return api.post("/api/custos-fixos", {
         ...novo,
-        valorMensal: Number(novo.valorMensal),
-      }),
+        valorMensal: fixoLido.valor,
+      });
+    },
     onSuccess: () => {
       toast.success("Custo fixo adicionado");
       setNovo({ descricao: "", categoria: "Aluguel", valorMensal: "", dataInicio: hojeBrasil() });
       qc.invalidateQueries({ queryKey: ["custos-fixos"] });
       qc.invalidateQueries({ queryKey: ["metas"] });
     },
+    onError: (e: any) => toast.error(e.message),
   });
 
   if (metas.isLoading) return <p className="text-[var(--text-muted)]">Carregando…</p>;
@@ -70,27 +88,39 @@ export default function MetasTab() {
         <h2 className="text-sm uppercase tracking-wide text-[var(--text-muted)]">Configurar metas</h2>
         <div className="flex flex-wrap gap-3 items-end">
           <div>
-            <label className="text-xs text-[var(--text-muted)]">Meta faturamento</label>
-            <input
-              type="number"
-              className="block mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
-              placeholder={String(m.metaFaturamento)}
+            <label className="text-xs text-[var(--text-muted)]" htmlFor="meta-faturamento">
+              Meta faturamento
+            </label>
+            <InputDecimalBr
+              id="meta-faturamento"
+              aria-invalid={!!erroMetaFat}
+              className="block mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 tabular-nums"
+              placeholder={paraCampoDecimalBr(m.metaFaturamento)}
               value={metaFat}
-              onChange={(e) => setMetaFat(e.target.value)}
+              onChange={setMetaFat}
             />
+            {erroMetaFat && (
+              <p className="mt-1 text-xs text-[var(--red-text)]">{erroMetaFat}</p>
+            )}
           </div>
           <div>
-            <label className="text-xs text-[var(--text-muted)]">Margem contribuição %</label>
-            <input
-              type="number"
-              className="block mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-28"
+            <label className="text-xs text-[var(--text-muted)]" htmlFor="meta-margem">
+              Margem contribuição %
+            </label>
+            <InputDecimalBr
+              id="meta-margem"
+              casas={null}
+              aria-invalid={!!erroMargem}
+              className="block mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-28 tabular-nums"
               placeholder={String(m.margemContribuicaoPct)}
               value={margem}
-              onChange={(e) => setMargem(e.target.value)}
+              onChange={setMargem}
             />
+            {erroMargem && <p className="mt-1 text-xs text-[var(--red-text)]">{erroMargem}</p>}
           </div>
           <button
             type="button"
+            disabled={!!erroMetaFat || !!erroMargem}
             onClick={() => saveMeta.mutate()}
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)]"
           >
@@ -124,7 +154,7 @@ export default function MetasTab() {
                   <td>
                     <button
                       type="button"
-                      className="text-[var(--red)] text-xs"
+                      className="text-[var(--red-text)] text-xs"
                       onClick={() =>
                         api.delete(`/api/custos-fixos/${c.id}`).then(() => {
                           qc.invalidateQueries({ queryKey: ["custos-fixos"] });
@@ -158,15 +188,17 @@ export default function MetasTab() {
               </option>
             ))}
           </select>
-          <input
-            type="number"
-            placeholder="Valor"
-            className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-28"
+          <InputDecimalBr
+            placeholder="Valor (ex.: 1.200,00)"
+            aria-label="Valor mensal do custo fixo"
+            aria-invalid={!!erroFixo}
+            className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 w-44 tabular-nums"
             value={novo.valorMensal}
-            onChange={(e) => setNovo({ ...novo, valorMensal: e.target.value })}
+            onChange={(valorMensal) => setNovo({ ...novo, valorMensal })}
           />
           <button
             type="button"
+            disabled={!!erroFixo}
             onClick={() => addFixo.mutate()}
             className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--bg)]"
           >
@@ -180,7 +212,7 @@ export default function MetasTab() {
 
 function Card({ label, value, tone }: { label: string; value: string; tone?: string }) {
   const color =
-    tone === "green" ? "text-[var(--green)]" : tone === "blue" ? "text-[var(--accent)]" : "text-[var(--text)]";
+    tone === "green" ? "text-[var(--green)]" : tone === "blue" ? "text-[var(--accent-text)]" : "text-[var(--text)]";
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
       <p className="text-xs uppercase text-[var(--text-muted)]">{label}</p>

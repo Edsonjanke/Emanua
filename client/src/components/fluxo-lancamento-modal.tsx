@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { hojeBrasil } from "@/lib/date";
 import { nomesCategorias, useCategorias } from "@/lib/use-categorias";
+import { parseValorPositivoDigitado } from "@shared/valor";
+import { InputDecimalBr, paraCampoDecimalBr } from "@/components/ui/input-decimal-br";
 
 export type LancamentoTipo = "receita" | "pagar" | "receber";
 
@@ -40,7 +42,7 @@ export default function FluxoLancamentoModal({
   const editing = !!initial.id;
   const tipo = initial.tipo;
   const [data, setData] = useState(initial.data || initial.dataVencimento || hojeBrasil());
-  const [valor, setValor] = useState(initial.valor != null ? String(initial.valor) : "");
+  const [valor, setValor] = useState(paraCampoDecimalBr(initial.valor));
   const [forma, setForma] = useState<"dinheiro" | "pix" | "cartao">(initial.forma || "dinheiro");
   const [observacao, setObservacao] = useState(initial.observacao || initial.observacoes || "");
   const [descricao, setDescricao] = useState(initial.descricao || "");
@@ -54,14 +56,27 @@ export default function FluxoLancamentoModal({
   const catsQ = useCategorias();
   const categoriasOpts = nomesCategorias(catsQ.data, categoria);
 
+  /**
+   * O valor é escrito em português ("99,90", "1.234,56", "R$ 1.400,00") e lido
+   * pelo mesmo parser do extrato. Antes este modal mandava `Number(valor)` cru,
+   * sem guarda nenhuma: NaN e negativo passavam direto para o servidor.
+   */
+  const valorLido = parseValorPositivoDigitado(valor);
+  const erroValor = valor.trim() === "" || valorLido.ok ? null : valorLido.erro;
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (!valorLido.ok) {
+      toast.error(valorLido.erro);
+      return;
+    }
+    const valorNum = valorLido.valor;
     setBusy(true);
     try {
       if (tipo === "receita") {
         const body = {
           data,
-          valor: Number(valor),
+          valor: valorNum,
           forma,
           observacao: observacao || null,
         };
@@ -71,7 +86,7 @@ export default function FluxoLancamentoModal({
       } else if (tipo === "pagar") {
         const body: Record<string, unknown> = {
           descricao,
-          valor: Number(valor),
+          valor: valorNum,
           dataVencimento: data,
           categoria,
           observacoes: observacao || null,
@@ -93,7 +108,7 @@ export default function FluxoLancamentoModal({
         const body = {
           clienteNome,
           descricao: descricao || null,
-          valor: Number(valor),
+          valor: valorNum,
           dataVencimento: data,
           observacoes: observacao || null,
         };
@@ -155,16 +170,26 @@ export default function FluxoLancamentoModal({
           onChange={(e) => setData(e.target.value)}
         />
 
-        <label className="block text-xs text-[var(--text-muted)]">Valor</label>
-        <input
-          type="number"
-          step="0.01"
-          min="0"
+        <label className="block text-xs text-[var(--text-muted)]" htmlFor="fluxo-valor">
+          Valor
+        </label>
+        {/* Texto, não `type="number"`: "99,90" digitado num teclado brasileiro
+            virava R$ 9.990,00 (ou um campo vazio, dependendo do navegador). */}
+        <InputDecimalBr
+          id="fluxo-valor"
           required
-          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2"
+          placeholder="Ex.: 99,90"
+          aria-describedby="fluxo-valor-erro"
+          aria-invalid={!!erroValor}
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 tabular-nums"
           value={valor}
-          onChange={(e) => setValor(e.target.value)}
+          onChange={setValor}
         />
+        {erroValor && (
+          <p id="fluxo-valor-erro" className="text-xs text-[var(--red-text)]">
+            {erroValor}
+          </p>
+        )}
 
         {tipo === "receita" && (
           <>
@@ -240,7 +265,7 @@ export default function FluxoLancamentoModal({
           </button>
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || !!erroValor}
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--on-accent)] disabled:opacity-50"
           >
             {busy ? "Salvando…" : "Salvar"}

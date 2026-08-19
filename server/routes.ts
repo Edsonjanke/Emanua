@@ -1,7 +1,7 @@
 import type { Express, RequestHandler } from "express";
 import bcrypt from "bcryptjs";
 import multer from "multer";
-import { and, asc, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, ne, sql } from "drizzle-orm";
 import { db } from "./db";
 import { requireAuth } from "./vite";
 import {
@@ -16,9 +16,37 @@ import {
   proLaboreRegras,
   categorias,
 } from "@shared/schema";
-import { parseExtratoArquivo } from "@shared/extrato-import";
+import {
+  parseExtratoArquivo,
+  buildDedupKey,
+  saldoInicialDe,
+  mensagemArquivoInvalido,
+  type ExtratoRow,
+} from "@shared/extrato-import";
+import {
+  classificarLinhas,
+  periodoDe,
+  totaisDe,
+  type LancamentoVinculavel,
+  type LinhaPreview,
+  type MovExistente,
+} from "@shared/extrato-diff";
 import { parseGendoContasPagarCsv } from "@shared/contas-pagar-import";
+import {
+  datasParcelasMensais,
+  normalizaTotalParcelas,
+  proximoVencimentoMensal,
+} from "@shared/parcelamento";
 import { sugerirConciliacao } from "@shared/extrato-conciliacao";
+import {
+  validarIdentidadeConta,
+  planejarContaAtiva,
+  perguntaContaDiferente,
+  type ContaIdentificada,
+  type DecisaoContaAtiva,
+  type MudancasFora,
+} from "@shared/extrato-conta";
+import { parseValorPositivo, parseValorPositivoOpcional } from "@shared/valor";
 import { resolveDebitoNatureza } from "@shared/prolabore";
 import {
   parsePlanilhaMovimentacoesBuffer,
@@ -42,6 +70,127 @@ const planilhaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
 });
+
+/**
+ * Carrega do banco tudo que o diff do extrato precisa: movimentações já
+ * importadas da mesma conta e lançamentos manuais candidatos a vínculo.
+ * A classificação em si mora em @shared/extrato-diff (pura, testável).
+ */
+async function carregarContextoDiff(
+  agencia: string,
+  conta: string,
+  rows: ExtratoRow[],
+): Promise<{
+  contaExistente: { id: string; nome: string } | null;
+  existentes: MovExistente[];
+  vinculaveis: LancamentoVinculavel[];
+  de: string | null;
+  ate: string | null;
+}> {
+  const { de, ate } = periodoDe(rows);
+  const [bc] = await db
+    .select()
+    .from(bancoContas)
+    .where(and(eq(bancoContas.agencia, agencia), eq(bancoContas.conta, conta)))
+    .limit(1);
+
+  const existentes: MovExistente[] = [];
+  if (bc && de && ate) {
+    // Janela folgada: uma transação corrigida pelo banco pode ter mudado de data.
+    const movs = await db
+      .select()
+      .from(bancoMovimentacoes)
+      .where(
+        and(
+          eq(bancoMovimentacoes.contaId, bc.id),
+          gte(bancoMovimentacoes.data, addDias(de, -30)),
+          lte(bancoMovimentacoes.data, addDias(ate, 30)),
+        ),
+      );
+    for (const m of movs) {
+      existentes.push({
+        id: m.id,
+        data: m.data,
+        historico: m.historico,
+        documento: m.documento,
+        valor: Number(m.valor),
+        tipo: m.tipo,
+        dedupKey: m.dedupKey,
+        ocorrencia: m.ocorrencia,
+      });
+    }
+  }
+
+  const vinculaveis: LancamentoVinculavel[] = [];
+  if (de && ate) {
+    const jDe = addDias(de, -7);
+    const jAte = addDias(ate, 7);
+
+    const cps = await db
+      .select()
+      .from(contasPagar)
+      .where(and(gte(contasPagar.dataVencimento, jDe), lte(contasPagar.dataVencimento, jAte)));
+    const cpsPagas = await db
+      .select()
+      .from(contasPagar)
+      .where(and(gte(contasPagar.dataPagamento, jDe), lte(contasPagar.dataPagamento, jAte)));
+    const cpVistos = new Set<string>();
+    for (const c of [...cps, ...cpsPagas]) {
+      if (cpVistos.has(c.id)) continue;
+      cpVistos.add(c.id);
+      vinculaveis.push({
+        tipo: "conta_pagar",
+        id: c.id,
+        descricao: c.descricao,
+        valor: Number(c.valor),
+        data: c.dataPagamento || c.dataVencimento,
+        fluxo: "D",
+        status: c.status,
+        dataPagamento: c.dataPagamento,
+      });
+    }
+
+    const recs = await db
+      .select()
+      .from(receitasDia)
+      .where(and(gte(receitasDia.data, jDe), lte(receitasDia.data, jAte)));
+    for (const r of recs) {
+      vinculaveis.push({
+        tipo: "receita_dia",
+        id: r.id,
+        descricao: r.observacao || `Receita ${r.forma}`,
+        valor: Number(r.valor),
+        data: r.data,
+        fluxo: "C",
+      });
+    }
+
+    const rbs = await db
+      .select()
+      .from(recebiveis)
+      .where(and(gte(recebiveis.dataVencimento, jDe), lte(recebiveis.dataVencimento, jAte)));
+    for (const r of rbs) {
+      vinculaveis.push({
+        tipo: "recebivel",
+        id: r.id,
+        descricao: r.descricao || r.clienteNome,
+        valor: Number(r.valorPago ?? r.valor),
+        data: r.dataPagamento || r.dataVencimento,
+        fluxo: "C",
+        status: r.status,
+        dataPagamento: r.dataPagamento,
+      });
+    }
+  }
+
+  return {
+    contaExistente: bc ? { id: bc.id, nome: bc.nome } : null,
+    existentes,
+    vinculaveis,
+    de,
+    ate,
+  };
+}
 
 function authorize(...roles: string[]): RequestHandler {
   return (req, res, next) => {
@@ -114,18 +263,219 @@ export async function registerRoutes(app: Express) {
     }
   });
 
+  /**
+   * Preview do import: parseia o arquivo e faz o DIFF contra o banco SEM ESCREVER NADA.
+   * O extrato tem prioridade — aqui a gente só mostra onde ele discorda do que está gravado.
+   */
+  app.post(
+    "/api/extrato/preview",
+    authorize("admin", "gestor"),
+    extratoUpload.single("file"),
+    async (req: any, res) => {
+      try {
+        if (!req.file) return res.status(400).json({ message: "Arquivo obrigatório (campo 'file')." });
+        const texto = req.file.buffer.toString("utf-8");
+        const parsed = parseExtratoArquivo(texto, req.file.originalname);
+        if (!parsed.header) {
+          return res.status(400).json({
+            message: mensagemArquivoInvalido(req.file.originalname, texto, parsed.erros, parsed),
+            erros: parsed.erros,
+          });
+        }
+
+        /*
+         * A identidade da conta é conferida JÁ NO PREVIEW: se ela veio de uma
+         * linha que o leitor não entendeu (agência "2026-07-01"), o arquivo é
+         * recusado aqui, antes de qualquer tela dizer que está tudo bem.
+         */
+        const identidade = validarIdentidadeConta(parsed.header.agencia, parsed.header.conta);
+        if (!identidade.ok) {
+          return res.status(400).json({ message: identidade.motivo, campo: identidade.campo });
+        }
+
+        const { agencia, conta } = parsed.header;
+        const ctx = await carregarContextoDiff(agencia, conta, parsed.rows);
+        const { linhas, resumo } = classificarLinhas({
+          rows: parsed.rows,
+          ignoradas: parsed.ignoradas ?? [],
+          naoLidas: parsed.naoLidas ?? [],
+          existentes: ctx.existentes,
+          vinculaveis: ctx.vinculaveis,
+        });
+
+        /*
+         * linhasLidas vem da FONTE — quantas linhas de dados o arquivo tem,
+         * contadas pelo parser antes de qualquer filtro. Era
+         * `rows.length + ignoradas.length`, ou seja, DEPOIS do descarte: o
+         * balanco fechava por construcao e nao detectava linha nenhuma sumindo.
+         */
+        const linhasLidas = parsed.linhasArquivo;
+        // Conta ativa HOJE: a tela precisa saber disso antes de gravar, para
+        // perguntar em vez de trocar em silêncio quando o extrato é de outra.
+        const [ativaAtual] = await db
+          .select()
+          .from(bancoContas)
+          .where(eq(bancoContas.ativo, true))
+          .orderBy(asc(bancoContas.createdAt))
+          .limit(1);
+        res.json({
+          arquivo: {
+            nome: req.file.originalname ?? "extrato",
+            formato: parsed.formato ?? "viacredi",
+            linhasLidas,
+          },
+          conta: {
+            agencia,
+            conta,
+            nomeSugerido: ctx.contaExistente?.nome || parsed.titular || `Conta ${agencia}/${conta}`,
+            titular: parsed.titular ?? null,
+            existenteId: ctx.contaExistente?.id ?? null,
+          },
+          contaAtiva: ativaAtual
+            ? {
+                id: ativaAtual.id,
+                nome: ativaAtual.nome,
+                agencia: ativaAtual.agencia,
+                conta: ativaAtual.conta,
+                mesmaDoArquivo: ativaAtual.id === (ctx.contaExistente?.id ?? null),
+              }
+            : null,
+          periodo: { de: ctx.de, ate: ctx.ate },
+          saldoExtrato: parsed.saldoExtrato ?? null,
+          // Saldo de abertura (linha SALDO ANTERIOR) — o preview usa para conferir
+          // se creditos − debitos bate com saldoFinal − saldoInicial.
+          saldoInicial: saldoInicialDe(parsed.ignoradas) ?? null,
+          totais: totaisDe(parsed.rows),
+          linhas,
+          resumo,
+          erros: parsed.erros,
+          naoLidas: parsed.naoLidas,
+        });
+      } catch (e: any) {
+        res.status(400).json({ message: e.message || "Falha ao gerar preview do extrato" });
+      }
+    },
+  );
+
   app.post("/api/extrato/import", authorize("admin", "gestor"), async (req, res) => {
     try {
-      const { agencia, conta, nome, rows, saldoInicialData, saldoInicialValor, ativar, formato } =
-        req.body ?? {};
+      const {
+        agencia,
+        conta,
+        nome,
+        rows,
+        saldoInicialData,
+        saldoInicialValor,
+        ativar,
+        formato,
+        modo,
+        selecionadas,
+        aplicarVinculos,
+        // Contagens do preview do MESMO arquivo, para o balanco do resultado
+        // poder fechar contra o numero de linhas do ARQUIVO, e nao contra o
+        // punhado de linhas que o cliente resolveu mandar.
+        linhasLidas: linhasLidasBody,
+        descartadas: descartadasBody,
+        naoLidas: naoLidasBody,
+        // Resposta do usuário quando o extrato é de uma conta diferente da ativa.
+        decisaoContaAtiva,
+      } = req.body ?? {};
       if (!agencia || !conta || !Array.isArray(rows)) {
         return res.status(400).json({ message: "agencia, conta e rows obrigatórios" });
       }
+
+      /*
+       * IDENTIDADE DA CONTA, ANTES DE QUALQUER ESCRITA.
+       *
+       * Sem esta porta, um arquivo cuja primeira linha foi lida como cabeçalho
+       * criava a conta agência "2026-07-01" / conta "D900" — uma data e um
+       * número de documento —, ativava essa conta e derrubava o saldo real do
+       * painel. Recusar aqui é o que garante que arquivo torto não vira estado.
+       */
+      const identidade = validarIdentidadeConta(agencia, conta);
+      if (!identidade.ok) {
+        return res.status(400).json({ message: identidade.motivo, campo: identidade.campo });
+      }
+
+      const modoImport: "somente-novas" | "sobrescrever" =
+        modo === "sobrescrever" ? "sobrescrever" : "somente-novas";
+      const filtro: Set<string> | null = Array.isArray(selecionadas)
+        ? new Set(selecionadas.map(String))
+        : null;
+      const selecionada = (dedupKey: string) => !filtro || filtro.has(dedupKey);
+
       let [bc] = await db
         .select()
         .from(bancoContas)
         .where(and(eq(bancoContas.agencia, String(agencia)), eq(bancoContas.conta, String(conta))))
         .limit(1);
+      const [ativaAntes] = await db
+        .select()
+        .from(bancoContas)
+        .where(eq(bancoContas.ativo, true))
+        .orderBy(asc(bancoContas.createdAt))
+        .limit(1);
+
+      /*
+       * QUEM FICA ATIVA — decisão do usuário, nunca efeito colateral do import.
+       *
+       * O código anterior fazia, sempre que `ativar !== false` (e o cliente
+       * manda `true` em todo import): desativa todas as outras, ativa esta.
+       * Qualquer arquivo roubava a conta ativa, e com ela o saldo real do
+       * painel. Agora, extrato de outra conta PARA aqui e pergunta — antes de
+       * criar conta, antes de gravar uma linha sequer.
+       */
+      const plano = planejarContaAtiva({
+        ativaAtual: ativaAntes
+          ? {
+              id: ativaAntes.id,
+              nome: ativaAntes.nome,
+              agencia: ativaAntes.agencia,
+              conta: ativaAntes.conta,
+            }
+          : null,
+        alvo: bc
+          ? { id: bc.id, nome: bc.nome, agencia: bc.agencia, conta: bc.conta }
+          : null,
+        extrato: {
+          agencia: String(agencia),
+          conta: String(conta),
+          nome: String(nome || `Conta ${agencia}/${conta}`),
+        },
+        decisao: (decisaoContaAtiva ?? null) as DecisaoContaAtiva | null,
+        ativar,
+      });
+      if (plano.acao === "perguntar") {
+        return res.status(409).json({
+          message: perguntaContaDiferente(plano),
+          pergunta: {
+            tipo: "conta-diferente",
+            contaAtiva: plano.contaAtiva,
+            contaExtrato: plano.contaExtrato,
+            opcoes: [
+              {
+                id: "manter",
+                rotulo: `Importar e manter ${plano.contaAtiva.nome} como conta ativa`,
+              },
+              {
+                id: "trocar",
+                rotulo: `Importar e ativar a conta do extrato (${plano.contaExtrato.nome})`,
+              },
+            ],
+          },
+        });
+      }
+      const ativarEstaConta = plano.acao === "ativar";
+
+      const contaCriada = !bc;
+      const nomeAntes = bc?.nome ?? null;
+      const ancoraAnterior = bc
+        ? {
+            data: bc.saldoInicialData ?? null,
+            valor: bc.saldoInicialValor != null ? Number(bc.saldoInicialValor) : null,
+          }
+        : null;
+
       if (!bc) {
         [bc] = await db
           .insert(bancoContas)
@@ -133,30 +483,88 @@ export async function registerRoutes(app: Express) {
             nome: nome || `Conta ${agencia}/${conta}`,
             agencia: String(agencia),
             conta: String(conta),
-            ativo: ativar !== false,
+            ativo: ativarEstaConta,
             saldoInicialData: saldoInicialData || null,
             saldoInicialValor: saldoInicialValor != null ? String(saldoInicialValor) : null,
           })
           .returning();
-      } else if (saldoInicialData != null || saldoInicialValor != null || ativar !== false) {
+      } else if (saldoInicialData != null || saldoInicialValor != null || ativarEstaConta) {
         await db
           .update(bancoContas)
           .set({
             ...(nome ? { nome: String(nome) } : {}),
-            ...(ativar !== false ? { ativo: true } : {}),
+            ...(ativarEstaConta ? { ativo: true } : {}),
             ...(saldoInicialData != null ? { saldoInicialData: String(saldoInicialData) } : {}),
             ...(saldoInicialValor != null ? { saldoInicialValor: String(saldoInicialValor) } : {}),
           })
           .where(eq(bancoContas.id, bc.id));
       }
 
-      if (ativar !== false) {
+      if (ativarEstaConta) {
         await db.update(bancoContas).set({ ativo: false }).where(ne(bancoContas.id, bc.id));
         await db.update(bancoContas).set({ ativo: true }).where(eq(bancoContas.id, bc.id));
       }
 
+      /*
+       * O QUE MUDOU FORA DAS LINHAS. A tela de resultado afirmava "Nenhum
+       * lançamento que já estava no sistema foi alterado" com a conta ativa
+       * trocada e o saldo do painel zerado — verdade sobre as linhas, mentira
+       * sobre o sistema. Aqui sai a lista, e a tela é obrigada a mostrá-la.
+       */
+      const mudancas: MudancasFora = {
+        contaCriada,
+        contaAtivaTrocada: ativarEstaConta && (ativaAntes?.id ?? null) !== bc.id,
+        contaAtivaAntes: ativaAntes ? { id: ativaAntes.id, nome: ativaAntes.nome } : null,
+        contaAtivaAgora: ativarEstaConta
+          ? { id: bc.id, nome: nome ? String(nome) : bc.nome }
+          : ativaAntes
+            ? { id: ativaAntes.id, nome: ativaAntes.nome }
+            : null,
+        // Só é MUDANÇA se mudou: regravar a mesma âncora com o mesmo valor não
+        // vira item de lista, senão a lista do que mudou deixa de valer nada.
+        ancoraGravada: (() => {
+          if (saldoInicialData == null && saldoInicialValor == null) return null;
+          const nova = {
+            data: saldoInicialData != null ? String(saldoInicialData) : ancoraAnterior?.data ?? null,
+            valor:
+              saldoInicialValor != null
+                ? Number(saldoInicialValor)
+                : ancoraAnterior?.valor ?? null,
+          };
+          const igual =
+            ancoraAnterior != null &&
+            ancoraAnterior.data === nova.data &&
+            ancoraAnterior.valor === nova.valor;
+          return igual ? null : nova;
+        })(),
+        ancoraAnterior,
+        nomeAlterado:
+          nome && nomeAntes && String(nome) !== nomeAntes
+            ? { de: nomeAntes, para: String(nome) }
+            : null,
+      };
+
       const BATCH = 100;
-      const values = rows.map((r: any) => ({
+
+      // Diff contra o que já está no banco: separa novas × conflitos × duplicadas.
+      const extratoRows = rows as ExtratoRow[];
+      const ctx = await carregarContextoDiff(String(agencia), String(conta), extratoRows);
+      const { linhas: classificadas } = classificarLinhas({
+        rows: extratoRows,
+        existentes: ctx.existentes,
+        vinculaveis: aplicarVinculos ? ctx.vinculaveis : [],
+      });
+      const porDedup = new Map<string, LinhaPreview>();
+      for (const l of classificadas) porDedup.set(l.dedupKey, l);
+
+      // Conflito nunca vira linha nova: ou é sobrescrito, ou fica de fora.
+      const aInserir = extratoRows.filter((r) => {
+        const l = porDedup.get(r.dedupKey);
+        if (!selecionada(r.dedupKey)) return false;
+        return !l || l.situacao !== "conflito";
+      });
+
+      const values = aInserir.map((r: any) => ({
         contaId: bc.id,
         data: r.data,
         historico: r.historico,
@@ -187,6 +595,73 @@ export async function registerRoutes(app: Express) {
             } catch {
               /* duplicate */
             }
+          }
+        }
+      }
+
+      // Sobrescrita: o extrato manda. Corrige valor/data/histórico do que já estava gravado.
+      let atualizadas = 0;
+      if (modoImport === "sobrescrever") {
+        for (const l of classificadas) {
+          if (l.situacao !== "conflito" || !l.existente) continue;
+          // Conflito que veio só do vínculo: a movimentação já está correta,
+          // reescrevê-la seria um UPDATE no-op contado como "atualizada".
+          if ((l.diffs?.length ?? 0) === 0) continue;
+          if (!selecionada(l.dedupKey)) continue;
+          const novaChave = buildDedupKey(
+            l.data!,
+            l.historico,
+            l.documento,
+            l.valor!,
+            l.tipo!,
+            l.ocorrencia ?? 1,
+          );
+          try {
+            await db
+              .update(bancoMovimentacoes)
+              .set({
+                data: l.data!,
+                historico: l.historico,
+                documento: l.documento,
+                valor: String(l.valor),
+                tipo: l.tipo!,
+                dedupKey: novaChave,
+              })
+              .where(eq(bancoMovimentacoes.id, l.existente.id));
+            atualizadas++;
+          } catch {
+            /* colisão de dedupKey: a linha correta já existe, nada a fazer */
+          }
+        }
+      }
+
+      // Vínculos: o extrato mostrando que a fonte manual (conta a pagar / receita) está errada.
+      let vinculosAtualizados = 0;
+      if (aplicarVinculos) {
+        for (const l of classificadas) {
+          const v = l.vinculo;
+          if (!v || v.diffs.length === 0) continue;
+          if (!selecionada(l.dedupKey)) continue;
+          try {
+            if (v.tipo === "conta_pagar") {
+              await db
+                .update(contasPagar)
+                .set({ valor: String(l.valor), dataPagamento: l.data!, status: "pago" })
+                .where(eq(contasPagar.id, v.id));
+            } else if (v.tipo === "receita_dia") {
+              await db
+                .update(receitasDia)
+                .set({ valor: String(l.valor), data: l.data! })
+                .where(eq(receitasDia.id, v.id));
+            } else {
+              await db
+                .update(recebiveis)
+                .set({ valorPago: String(l.valor), dataPagamento: l.data!, status: "paga" })
+                .where(eq(recebiveis.id, v.id));
+            }
+            vinculosAtualizados++;
+          } catch {
+            /* vínculo já removido/alterado por outra rota */
           }
         }
       }
@@ -286,12 +761,65 @@ export async function registerRoutes(app: Express) {
         }
       }
 
+      /*
+       * BALANCO DO RESULTADO — os numeros que o servidor REALMENTE produziu.
+       *
+       * Antes o cliente reconstruia isso sozinho a partir da classificacao do
+       * preview (`inseridas = min(inseridas, novas)`, `foraDaSelecao = novas -
+       * inseridas`, ...), o que colapsa algebricamente no balanco do preview e
+       * fecha sempre, tenha o import gravado o que tiver gravado. Aqui cada
+       * categoria sai de um fato: `inseridas`/`atualizadas` vem do banco,
+       * o resto da classificacao das linhas que o cliente mandou.
+       */
+      let cNovas = 0;
+      let cDuplicadas = 0;
+      let cConflitos = 0;
+      let novasSelecionadas = 0;
+      for (const l of classificadas) {
+        if (l.situacao === "nova") {
+          cNovas++;
+          if (selecionada(l.dedupKey)) novasSelecionadas++;
+        } else if (l.situacao === "duplicada") cDuplicadas++;
+        else if (l.situacao === "conflito") cConflitos++;
+      }
+      const foraDaSelecao = cNovas - novasSelecionadas;
+      // Marcada para inserir mas o INSERT nao criou linha: ja estava gravada.
+      const colisoes = novasSelecionadas - inseridas;
+      const jaNoSistema = cDuplicadas + colisoes + (cConflitos - atualizadas);
+
+      const inteiro = (v: unknown, padrao: number): number => {
+        const n = Math.trunc(Number(v));
+        return Number.isFinite(n) && n >= 0 ? n : padrao;
+      };
+      const descartadas = inteiro(descartadasBody, 0);
+      const naoLidasCount = inteiro(naoLidasBody, 0);
+      // Sem o numero do arquivo, o balanco so pode falar do que recebeu.
+      const linhasDoArquivo = inteiro(
+        linhasLidasBody,
+        extratoRows.length + descartadas + naoLidasCount,
+      );
+
       res.json({
         contaId: bc.id,
         inseridas,
         total: rows.length,
         receitasInseridas,
         despesasInseridas,
+        modo: modoImport,
+        atualizadas,
+        vinculosAtualizados,
+        conta: { id: bc.id, nome: nome ? String(nome) : bc.nome },
+        mudancas,
+        balanco: {
+          linhasLidas: linhasDoArquivo,
+          linhasRecebidas: extratoRows.length,
+          inseridas,
+          regravadas: atualizadas,
+          jaNoSistema,
+          foraDaSelecao,
+          descartadas,
+          naoLidas: naoLidasCount,
+        },
       });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -435,6 +963,14 @@ export async function registerRoutes(app: Express) {
         despesasInseridas: 0,
         despesasDuplicadas: 0,
         contasCriadas: [] as string[],
+        /*
+         * O que mudou FORA das linhas. Importar planilha trocava a conta ativa
+         * em silêncio e o resultado só falava de linhas inseridas — a mesma
+         * mentira por omissão que o import de extrato já tinha consertado.
+         */
+        contaAtivaTrocada: false,
+        contaAtivaAntes: null as string | null,
+        contaAtivaAgora: null as string | null,
       };
 
       const BATCH = 100;
@@ -463,17 +999,98 @@ export async function registerRoutes(app: Express) {
             ? String(req.body.saldoInicialValor)
             : "0";
 
+        /*
+         * IDENTIDADE ANTES DE QUALQUER ESCRITA — o irmão do que o import de
+         * extrato já faz. Aqui a identidade é constante, e por isso mesmo a
+         * porta é barata: se um dia alguém passar a tirar "agencia"/"conta" do
+         * arquivo, ela já está no caminho e um arquivo torto não vira conta.
+         */
+        const identidade = validarIdentidadeConta("planilha", slug);
+        if (!identidade.ok) {
+          return res.status(400).json({ message: identidade.motivo, campo: identidade.campo });
+        }
+
         const [existing] = await db
           .select()
           .from(bancoContas)
-          .where(and(eq(bancoContas.agencia, "planilha"), eq(bancoContas.conta, slug)))
+          .where(
+            and(
+              eq(bancoContas.agencia, identidade.agencia),
+              eq(bancoContas.conta, identidade.conta),
+            ),
+          )
           .limit(1);
+        const [ativaAntes] = await db
+          .select()
+          .from(bancoContas)
+          .where(eq(bancoContas.ativo, true))
+          .orderBy(asc(bancoContas.createdAt))
+          .limit(1);
+
+        /*
+         * QUEM FICA ATIVA — decisão do usuário, nunca efeito colateral.
+         *
+         * Este trecho fazia, SEMPRE: `SET ativo=false WHERE id <> contaId`
+         * seguido de `SET ativo=true WHERE id = contaId`. Era o irmão exato do
+         * defeito já consertado no import de extrato: importar uma planilha
+         * roubava a conta ativa — e com ela o saldo real do painel — sem
+         * perguntar nada e sem dizer nada depois. O Fluxo lê a conta ativa, e
+         * de repente o saldo era o da planilha, não o do banco.
+         *
+         * Agora vale a mesma regra do extrato: só troca quando não há nada a
+         * perder (primeira conta), quando não há troca nenhuma (a consolidada
+         * já era a ativa) ou quando o usuário respondeu que quer trocar.
+         */
+        const plano = planejarContaAtiva({
+          ativaAtual: ativaAntes
+            ? {
+                id: ativaAntes.id,
+                nome: ativaAntes.nome,
+                agencia: ativaAntes.agencia,
+                conta: ativaAntes.conta,
+              }
+            : null,
+          alvo: existing
+            ? {
+                id: existing.id,
+                nome: existing.nome,
+                agencia: existing.agencia,
+                conta: existing.conta,
+              }
+            : null,
+          extrato: { agencia: identidade.agencia, conta: identidade.conta, nome: consolidado },
+          decisao: (req.body?.decisaoContaAtiva ?? null) as DecisaoContaAtiva | null,
+          ativar: req.body?.ativarConta,
+        });
+        if (plano.acao === "perguntar") {
+          // Nada foi gravado: é pergunta, não falha. Mesmo contrato do extrato.
+          return res.status(409).json({
+            message: perguntaContaDiferente(plano),
+            pergunta: {
+              tipo: "conta-diferente",
+              contaAtiva: plano.contaAtiva,
+              contaExtrato: plano.contaExtrato,
+              opcoes: [
+                {
+                  id: "manter",
+                  rotulo: `Importar e manter ${plano.contaAtiva.nome} como conta ativa`,
+                },
+                {
+                  id: "trocar",
+                  rotulo: `Importar e ativar a ${plano.contaExtrato.nome}`,
+                },
+              ],
+            },
+          });
+        }
+        const ativarEstaConta = plano.acao === "ativar";
+
         if (existing) {
           contaId = existing.id;
           await db
             .update(bancoContas)
             .set({
-              ativo: true,
+              ...(ativarEstaConta ? { ativo: true } : {}),
               saldoInicialData: ancoraData,
               saldoInicialValor: ancoraValor,
             })
@@ -483,9 +1100,9 @@ export async function registerRoutes(app: Express) {
             .insert(bancoContas)
             .values({
               nome: consolidado,
-              agencia: "planilha",
-              conta: slug,
-              ativo: true,
+              agencia: identidade.agencia,
+              conta: identidade.conta,
+              ativo: ativarEstaConta,
               saldoInicialData: ancoraData,
               saldoInicialValor: ancoraValor,
             })
@@ -493,9 +1110,15 @@ export async function registerRoutes(app: Express) {
           result.contasCriadas.push(consolidado);
           contaId = created.id;
         }
-        // Fluxo usa a 1ª conta ativa — garante só a consolidada.
-        await db.update(bancoContas).set({ ativo: false }).where(ne(bancoContas.id, contaId));
-        await db.update(bancoContas).set({ ativo: true }).where(eq(bancoContas.id, contaId));
+        // Fluxo usa a 1ª conta ativa. Só desativa as outras quando a troca foi
+        // autorizada — antes isto rodava em todo import, incondicionalmente.
+        if (ativarEstaConta) {
+          await db.update(bancoContas).set({ ativo: false }).where(ne(bancoContas.id, contaId));
+          await db.update(bancoContas).set({ ativo: true }).where(eq(bancoContas.id, contaId));
+        }
+        result.contaAtivaTrocada = ativarEstaConta && (ativaAntes?.id ?? null) !== contaId;
+        result.contaAtivaAntes = ativaAntes?.nome ?? null;
+        result.contaAtivaAgora = ativarEstaConta ? consolidado : (ativaAntes?.nome ?? null);
 
         // Reimport: remove transferências internas que tenham entrado antes.
         if (opts.skipTransferenciasInternas) {
@@ -986,6 +1609,9 @@ export async function registerRoutes(app: Express) {
                   dataVencimento: x.dataVencimento,
                   status: x.status,
                   observacoes: x.observacoes,
+                  recorrencia: x.recorrencia,
+                  parcelaAtual: x.parcelaAtual,
+                  totalParcelas: x.totalParcelas,
                 })),
                 ...receitasDoDia.map((x) => ({
                   id: x.id,
@@ -1092,11 +1718,14 @@ export async function registerRoutes(app: Express) {
     if (!["dinheiro", "pix", "cartao"].includes(forma)) {
       return res.status(400).json({ message: "forma inválida" });
     }
+    // Receita negativa inflaria o saldo projetado ao contrário. Mesmo buraco.
+    const vp = parseValorPositivo(valor);
+    if (!vp.ok) return res.status(400).json({ message: vp.erro });
     const [row] = await db
       .insert(receitasDia)
       .values({
         data: String(data),
-        valor: String(valor),
+        valor: String(vp.valor),
         forma,
         observacao: observacao ?? null,
       })
@@ -1109,9 +1738,11 @@ export async function registerRoutes(app: Express) {
     if (body.forma != null && !["dinheiro", "pix", "cartao"].includes(body.forma)) {
       return res.status(400).json({ message: "forma inválida" });
     }
+    const vpPatch = parseValorPositivoOpcional(body.valor);
+    if (vpPatch && !vpPatch.ok) return res.status(400).json({ message: vpPatch.erro });
     const patch: Record<string, unknown> = {};
     if (body.data != null) patch.data = String(body.data);
-    if (body.valor != null) patch.valor = String(body.valor);
+    if (vpPatch?.ok) patch.valor = String(vpPatch.valor);
     if (body.forma != null) patch.forma = body.forma;
     if (body.observacao !== undefined) patch.observacao = body.observacao;
     const [row] = await db
@@ -1131,15 +1762,33 @@ export async function registerRoutes(app: Express) {
   // ── Contas a pagar ────────────────────────────────────────────────────
   app.get("/api/contas-pagar", async (req, res) => {
     const status = req.query.status ? String(req.query.status).split(",") : null;
-    let rows = await db.select().from(contasPagar).orderBy(desc(contasPagar.dataVencimento));
     const hoje = hojeBrasil();
-    // marca vencidos
-    for (const r of rows) {
-      if (r.status === "pendente" && r.dataVencimento < hoje) {
-        await db.update(contasPagar).set({ status: "vencido" }).where(eq(contasPagar.id, r.id));
-        r.status = "vencido";
-      }
-    }
+
+    /*
+     * "Vencido" continua sendo ESTADO GRAVADO, não derivado na leitura: outras
+     * rotas leem a coluna status direto do banco (o Fluxo filtra
+     * status IN ('pendente','vencido')) e o import do CSV já grava "vencido".
+     * Derivar só aqui deixaria duas definições de vencida no sistema.
+     *
+     * O que muda é o CUSTO: antes era um SELECT + um UPDATE por linha vencida
+     * dentro do laço (1 + N queries por GET). Agora é UM UPDATE em lote com
+     * WHERE, antes do SELECT — 2 queries fixas, e a segunda chamada no mesmo dia
+     * atualiza 0 linhas (idempotente de verdade, não convergente à força de N
+     * escritas).
+     */
+    await db
+      .update(contasPagar)
+      .set({ status: "vencido" })
+      .where(and(eq(contasPagar.status, "pendente"), lt(contasPagar.dataVencimento, hoje)));
+
+    // Desempate estável: duas contas do mesmo dia precisam sair SEMPRE na mesma
+    // ordem. Sem isto, marcar uma conta como paga embaralhava as vizinhas de
+    // 03/09 entre duas cargas — o Postgres não promete ordem em empate.
+    let rows = await db
+      .select()
+      .from(contasPagar)
+      .orderBy(desc(contasPagar.dataVencimento), asc(contasPagar.createdAt), asc(contasPagar.id));
+
     if (status) rows = rows.filter((r) => status.includes(r.status));
     res.json(rows);
   });
@@ -1150,28 +1799,25 @@ export async function registerRoutes(app: Express) {
     if (!descricao || valor == null || !dataVencimento) {
       return res.status(400).json({ message: "descricao, valor, dataVencimento obrigatórios" });
     }
+    // Uma conta a pagar de valor negativo REDUZIA o total devido. Não existe.
+    const vp = parseValorPositivo(valor);
+    if (!vp.ok) return res.status(400).json({ message: vp.erro });
 
-    const nParcelas = Math.min(60, Math.max(0, Number(totalParcelas) || 0));
+    const nParcelas = normalizaTotalParcelas(totalParcelas);
     const isParcelado = nParcelas >= 2 && recorrencia !== "mensal";
 
     if (isParcelado) {
-      const base = String(dataVencimento);
-      const values = [];
-      for (let i = 0; i < nParcelas; i++) {
-        const d = new Date(base + "T12:00:00Z");
-        d.setUTCMonth(d.getUTCMonth() + i);
-        values.push({
-          descricao: String(descricao),
-          valor: String(valor),
-          dataVencimento: d.toISOString().slice(0, 10),
-          categoria: categoria ?? null,
-          observacoes: observacoes ?? null,
-          recorrencia: null as null,
-          parcelaAtual: i + 1,
-          totalParcelas: nParcelas,
-          status: "pendente" as const,
-        });
-      }
+      const values = datasParcelasMensais(String(dataVencimento), nParcelas).map((venc, i) => ({
+        descricao: String(descricao),
+        valor: String(vp.valor),
+        dataVencimento: venc,
+        categoria: categoria ?? null,
+        observacoes: observacoes ?? null,
+        recorrencia: null as null,
+        parcelaAtual: i + 1,
+        totalParcelas: nParcelas,
+        status: "pendente" as const,
+      }));
       const rows = await db.insert(contasPagar).values(values).returning();
       return res.status(201).json({ parcelas: rows, count: rows.length });
     }
@@ -1180,7 +1826,7 @@ export async function registerRoutes(app: Express) {
       .insert(contasPagar)
       .values({
         descricao: String(descricao),
-        valor: String(valor),
+        valor: String(vp.valor),
         dataVencimento: String(dataVencimento),
         categoria: categoria ?? null,
         observacoes: observacoes ?? null,
@@ -1222,6 +1868,16 @@ export async function registerRoutes(app: Express) {
       }[];
       if (!Array.isArray(rows) || rows.length === 0) {
         return res.status(400).json({ message: "rows obrigatório" });
+      }
+      // O corpo vem do preview, mas quem chama a rota é o cliente: mesma guarda.
+      for (const [i, r] of rows.entries()) {
+        const vp = parseValorPositivo(r.valor);
+        if (!vp.ok) {
+          return res
+            .status(400)
+            .json({ message: `Linha ${i + 1} (“${r.descricao ?? "?"}”): ${vp.erro.toLowerCase()}` });
+        }
+        r.valor = vp.valor;
       }
 
       const existing = await db
@@ -1282,7 +1938,10 @@ export async function registerRoutes(app: Express) {
     ]) {
       if (body[k] !== undefined) patch[k] = body[k] == null ? null : String(body[k]);
     }
-    if (patch.valor != null) patch.valor = String(body.valor);
+    // Editar para −50 seria o mesmo buraco do POST pela porta dos fundos.
+    const vpPatch = parseValorPositivoOpcional(body.valor);
+    if (vpPatch && !vpPatch.ok) return res.status(400).json({ message: vpPatch.erro });
+    if (vpPatch?.ok) patch.valor = String(vpPatch.valor);
     if (patch.recorrencia !== undefined) patch.recorrencia = body.recorrencia === "mensal" ? "mensal" : null;
     if (body.parcelaAtual !== undefined) {
       patch.parcelaAtual = body.parcelaAtual == null ? null : Number(body.parcelaAtual);
@@ -1299,9 +1958,7 @@ export async function registerRoutes(app: Express) {
       patch.recorrencia !== undefined ? patch.recorrencia === "mensal" : atual.recorrencia === "mensal";
     if (patch.status === "pago" && ficouMensal && atual.status !== "pago") {
       const baseVenc = String(patch.dataVencimento ?? atual.dataVencimento);
-      const d = new Date(baseVenc + "T12:00:00Z");
-      d.setUTCMonth(d.getUTCMonth() + 1);
-      const nextVenc = d.toISOString().slice(0, 10);
+      const nextVenc = proximoVencimentoMensal(baseVenc);
       await db.insert(contasPagar).values({
         descricao: String(patch.descricao ?? atual.descricao),
         valor: String(patch.valor ?? atual.valor),
@@ -1332,18 +1989,46 @@ export async function registerRoutes(app: Express) {
   });
 
   app.post("/api/recebiveis", authorize("admin", "gestor"), async (req, res) => {
-    const { clienteNome, descricao, valor, dataVencimento, observacoes } = req.body ?? {};
+    const { clienteNome, descricao, valor, dataVencimento, observacoes, recorrencia, totalParcelas } =
+      req.body ?? {};
     if (!clienteNome || valor == null || !dataVencimento) {
       return res.status(400).json({ message: "clienteNome, valor, dataVencimento obrigatórios" });
     }
+    // Mesmo buraco de contas a pagar, do outro lado do caixa.
+    const vp = parseValorPositivo(valor);
+    if (!vp.ok) return res.status(400).json({ message: vp.erro });
+
+    const nParcelas = normalizaTotalParcelas(totalParcelas);
+    const isParcelado = nParcelas >= 2 && recorrencia !== "mensal";
+
+    // Pacote parcelado: N recebíveis mensais com o mesmo valor de parcela.
+    if (isParcelado) {
+      const values = datasParcelasMensais(String(dataVencimento), nParcelas).map((venc, i) => ({
+        clienteNome: String(clienteNome),
+        descricao: descricao ?? null,
+        valor: String(vp.valor),
+        dataVencimento: venc,
+        observacoes: observacoes ?? null,
+        recorrencia: null as null,
+        parcelaAtual: i + 1,
+        totalParcelas: nParcelas,
+        status: "aberta" as const,
+      }));
+      const rows = await db.insert(recebiveis).values(values).returning();
+      return res.status(201).json({ parcelas: rows, count: rows.length });
+    }
+
     const [row] = await db
       .insert(recebiveis)
       .values({
         clienteNome: String(clienteNome),
         descricao: descricao ?? null,
-        valor: String(valor),
+        valor: String(vp.valor),
         dataVencimento: String(dataVencimento),
         observacoes: observacoes ?? null,
+        recorrencia: recorrencia === "mensal" ? "mensal" : null,
+        parcelaAtual: null,
+        totalParcelas: null,
         status: "aberta",
       })
       .returning();
@@ -1353,9 +2038,63 @@ export async function registerRoutes(app: Express) {
   app.patch("/api/recebiveis/:id", authorize("admin", "gestor"), async (req, res) => {
     const body = req.body ?? {};
     const patch: Record<string, unknown> = {};
-    for (const k of ["clienteNome", "descricao", "valor", "dataVencimento", "observacoes", "status", "dataPagamento", "valorPago"]) {
+    for (const k of [
+      "clienteNome",
+      "descricao",
+      "valor",
+      "dataVencimento",
+      "observacoes",
+      "status",
+      "dataPagamento",
+      "valorPago",
+      "recorrencia",
+    ]) {
       if (body[k] !== undefined) patch[k] = body[k] == null ? null : String(body[k]);
     }
+    const vpPatch = parseValorPositivoOpcional(body.valor);
+    if (vpPatch && !vpPatch.ok) return res.status(400).json({ message: vpPatch.erro });
+    if (vpPatch?.ok) patch.valor = String(vpPatch.valor);
+    // valorPago também é dinheiro: aceita ficar em branco, nunca negativo.
+    const vpPago = parseValorPositivoOpcional(body.valorPago);
+    if (body.valorPago != null && vpPago && !vpPago.ok) {
+      return res.status(400).json({ message: vpPago.erro });
+    }
+    if (vpPago?.ok) patch.valorPago = String(vpPago.valor);
+    if (patch.recorrencia !== undefined) {
+      patch.recorrencia = body.recorrencia === "mensal" ? "mensal" : null;
+    }
+    if (body.parcelaAtual !== undefined) {
+      patch.parcelaAtual = body.parcelaAtual == null ? null : Number(body.parcelaAtual);
+    }
+    if (body.totalParcelas !== undefined) {
+      patch.totalParcelas = body.totalParcelas == null ? null : Number(body.totalParcelas);
+    }
+
+    const [atual] = await db
+      .select()
+      .from(recebiveis)
+      .where(eq(recebiveis.id, req.params.id))
+      .limit(1);
+    if (!atual) return res.status(404).json({ message: "Não encontrado" });
+
+    // Baixa com recorrência mensal → já cria o recebível do mês seguinte.
+    const ficouMensal =
+      patch.recorrencia !== undefined
+        ? patch.recorrencia === "mensal"
+        : atual.recorrencia === "mensal";
+    if (patch.status === "paga" && ficouMensal && atual.status !== "paga") {
+      const baseVenc = String(patch.dataVencimento ?? atual.dataVencimento);
+      await db.insert(recebiveis).values({
+        clienteNome: String(patch.clienteNome ?? atual.clienteNome),
+        descricao: (patch.descricao as string) ?? atual.descricao,
+        valor: String(patch.valor ?? atual.valor),
+        dataVencimento: proximoVencimentoMensal(baseVenc),
+        observacoes: (patch.observacoes as string) ?? atual.observacoes,
+        recorrencia: "mensal",
+        status: "aberta",
+      });
+    }
+
     if (patch.status === "paga" && !patch.dataPagamento) patch.dataPagamento = hojeBrasil();
     const [row] = await db.update(recebiveis).set(patch as any).where(eq(recebiveis.id, req.params.id)).returning();
     if (!row) return res.status(404).json({ message: "Não encontrado" });
